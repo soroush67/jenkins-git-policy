@@ -412,3 +412,25 @@ func TestParseDiffTreeRejectsGarbage(t *testing.T) {
 		}
 	}
 }
+
+func TestSizesAndHeads(t *testing.T) {
+	r := newRepo(t)
+	r.commit("c", map[string]string{"small.txt": "hello", "big.bin": strings.Repeat("A", 200000)})
+	small := r.run("rev-parse", "HEAD:small.txt")
+	big := r.run("rev-parse", "HEAD:big.bin")
+	sizes, err := Sizes(context.Background(), r.git, r.dir, []string{small, big, small})
+	if err != nil || sizes[small] != 5 || sizes[big] != 200000 {
+		t.Fatalf("sizes %v %v", sizes, err)
+	}
+	heads, err := Heads(context.Background(), r.git, r.dir, []string{big, small}, 16)
+	if err != nil || string(heads[small]) != "hello" || string(heads[big]) != strings.Repeat("A", 16) {
+		t.Fatalf("heads %q %v", heads, err)
+	}
+	if _, err := Sizes(context.Background(), r.git, r.dir, []string{strings.Repeat("e", 40)}); err == nil {
+		t.Fatal("missing object must be an error (fail closed)")
+	}
+	tree := r.run("rev-parse", "HEAD^{tree}")
+	if _, err := Sizes(context.Background(), r.git, r.dir, []string{tree}); err == nil {
+		t.Fatal("non-blob must be an error")
+	}
+}

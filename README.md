@@ -8,7 +8,7 @@ Software version: see `VERSION` (v0.1.0). Policy schema: `apiVersion: git-policy
 
 > Status: under phased development (Phases 1-6 done: install, enable/disable/status,
 > atomic policy versions, identity rules, anti-bypass traversal,
-> extension/path enforcement). Jenkins is the operator UI (Phase 11). Full documentation (INSTALL, CONFIGURATION,
+> extension/path, size and PE-signature enforcement). Jenkins is the operator UI (Phase 11). Full documentation (INSTALL, CONFIGURATION,
 > SECURITY, OPERATIONS, TROUBLESHOOTING) arrives in Phase 15.
 > Design: [Phase 1 architecture](docs/design/PHASE-1-ARCHITECTURE.md),
 > [Phase 2 schema & precedence](docs/design/PHASE-2-SCHEMA.md).
@@ -38,7 +38,7 @@ tools/build.sh         docker-based vendor/test/build (no Go needed on the host)
 
 ```bash
 tools/build.sh test     # gofmt + go vet + go test (in golang:1.24-alpine)
-tests/integration/phase{4,5,6,7}.sh   # real git push tests (phase6 runs inside Git's quarantine)
+tests/integration/phase{4,5,6,7,8}.sh   # real git push tests (phase6 runs inside Git's quarantine)
 tools/build.sh build    # dist/git-policy-<version>-linux-amd64 + .sha256
 dist/git-policy-0.1.0-linux-amd64 validate examples/policy.example.yaml
 ```

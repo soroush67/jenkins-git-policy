@@ -1,7 +1,7 @@
 # راهنمای فارسی git-policy
 
 > نسخه نرم‌افزار: **v0.1.0** — نسخه schema سیاست: **`git-policy/v1`**
-> وضعیت: فازهای ۱ تا ۷ انجام شده. قوانین **هویت** (کاربر، گروه، پروژه، ref، استثنا) و قوانین **پسوند و مسیر فایل** (DLL، EXE، …) روی **همه‌ی commitهای جدید** اجرا می‌شوند. حجم فایل و امضای PE در فاز ۸ اضافه می‌شوند.
+> وضعیت: فازهای ۱ تا ۸ انجام شده. **همه‌ی قوانین enforcement** فعال‌اند: هویت (کاربر، گروه، پروژه، ref)، پسوند و مسیر فایل، حجم فایل، و تشخیص فایل اجرایی ویندوز از روی محتوا. همه روی **همه‌ی commitهای جدید** هر push اجرا می‌شوند.
 >
 > **رابط کاربری نهایی این سیستم Jenkins است.** دستورهای `docker exec ... admin` در این راهنما فقط برای تست lab در همین مراحل‌اند؛ در فاز ۱۱ همه‌ی ورودی‌ها و عملیات از طریق Jenkins انجام می‌شود.
 
@@ -49,8 +49,8 @@ Jenkins (Control Plane) ──> فقط مدیریت: apply / enable / disable / 
 | ۴ | ENABLE / DISABLE / STATUS، apply/rollback اتمیک، نصب | ✅ تأیید شده |
 | ۵ | قوانین هویت و scope (user/group/namespace/project/ref)، استثناها، explain | ✅ تأیید شده |
 | ۶ | پیمایش ضد-دور‌زدن (همه‌ی commitهای جدید)، محدودیت‌ها، timeout | ✅ تأیید شده |
-| ۷ | پسوند و مسیر فایل (DLL, EXE, ...)، حالت audit، بازنشسته کردن PoC | ✅ **انجام شده (منتظر تأیید)** |
-| ۸ | حجم blob و امضای PE | ⏳ |
+| ۷ | پسوند و مسیر فایل (DLL, EXE, ...)، حالت audit، بازنشسته کردن PoC | ✅ تأیید شده |
+| ۸ | حجم blob و امضای PE | ✅ **انجام شده (منتظر تأیید)** |
 | ۹ به بعد | Audit کامل، cache گروه‌ها، Jenkins، تست، امنیت، کارایی، مستندات | ⏳ |
 
 > ✅ از فاز ۷ به بعد **git-policy خودش DLL/EXE و مسیرهای ممنوع را رد می‌کند.** PoC قدیمی (`01-block-dll`) تا زمانی که شما روی lab تأیید کنید دست‌نخورده می‌ماند و بعد با `admin retire-hook` بازنشسته می‌شود (بخش ۱۵.۵).
@@ -101,6 +101,7 @@ tests/integration/phase4.sh   # ۳۷ تست: نصب، روشن/خاموش، appl
 tests/integration/phase5.sh   # ۴۰ تست: قوانین کاربر/گروه/استثنا با git push واقعی
 tests/integration/phase6.sh   # ۲۳ تست: پیمایش ضد-دور‌زدن داخل quarantine گیت، محدودیت‌ها، کارایی
 tests/integration/phase7.sh   # ۴۲ تست: رد DLL/EXE/مسیر با hook واقعی، ترفندهای NTFS، حالت audit، هم‌زمانی
+tests/integration/phase8.sh   # ۲۲ تست: حجم فایل، سقف mandatory و استثنا، امضای PE، کارایی
 ```
 
 خروجی مورد انتظار:
@@ -109,6 +110,7 @@ RESULT: 37 passed, 0 failed     (phase4)
 RESULT: 40 passed, 0 failed     (phase5)
 RESULT: 23 passed, 0 failed     (phase6)
 RESULT: 42 passed, 0 failed     (phase7)
+RESULT: 22 passed, 0 failed     (phase8)
 ```
 
 اولین اجرای `tools/build.sh` یک image کوچک به نام `git-policy-build:go1.24` (Go + git) می‌سازد (فقط یک بار، نیاز به اینترنت).
@@ -794,7 +796,89 @@ docker exec -u root gitlab sh -c 'cp /var/opt/gitlab/git-policy/backup/01-block-
 
 ---
 
-## ۱۶. واژه‌نامه
+## ۱۶. فاز ۸: حجم فایل و تشخیص فایل اجرایی از روی محتوا
+
+### ۱۶.۱ حجم فایل (`FILE_TOO_LARGE`)
+
+- حجم هر blob جدید از **header شیء Git** خوانده می‌شود (`git cat-file --batch-check`). **هیچ checkoutی انجام نمی‌شود و محتوای فایل خوانده نمی‌شود.** یک فایل ۱۹ مگابایتی فقط از روی اندازه‌اش رد شد.
+- حد مؤثر همان قاعده‌ی فاز ۲ است: دقیق‌ترین سطح (ref > project > namespace > defaults)، ولی **هرگز بالاتر از `mandatory.max_file_size`**.
+- دقیقاً برابر حد مجاز است؛ یک بایت بیشتر رد می‌شود.
+
+| حجم فایل | نتیجه |
+|---|---|
+| ≤ حد مؤثر | ✅ قبول |
+| بیشتر از حد مؤثر، ولی ≤ سقف mandatory | ❌ رد؛ یک استثنای **معمولی** با `max_file_size` کافی است |
+| بیشتر از سقف mandatory | ❌ رد؛ فقط استثنای **`mandatory: true`** با `max_file_size` کافی |
+
+```yaml
+mandatory:
+  max_file_size: 50MiB             # سقف سازمانی
+defaults:
+  max_file_size: 20MiB
+projects:
+  media/site: {max_file_size: 40MiB}
+exceptions:
+  - id: EXC-MODEL
+    rules: [FILE_TOO_LARGE]
+    mandatory: true                  # چون از سقف 50MiB بالاتر است
+    subjects: {users: [ds1]}
+    scope: {projects: [analytics/forecast]}
+    max_file_size: 200MiB            # فقط تا این حد، نه نامحدود
+    reason: model snapshots until the artifact store exists
+    expires: 2026-12-15
+```
+
+پیام توسعه‌دهنده:
+```
+remote: GL-HOOK-ERR: Rule: FILE_TOO_LARGE
+remote: GL-HOOK-ERR: File: data/large.bin
+remote: GL-HOOK-ERR: Size: 3.0 MiB (limit 2.0 MiB)
+remote: GL-HOOK-ERR: Required action (FILE_TOO_LARGE): Store large artifacts in Nexus ...
+```
+
+**دور زدن‌ها هم پوشش داده شده‌اند:**
+- فایل بزرگی که در یک commit اضافه و در commit بعدی همان push حذف شود رد می‌شود.
+- tagی که مستقیم به یک blob بزرگ اشاره کند رد می‌شود.
+
+> **Git LFS:** فایل‌هایی که با LFS ذخیره می‌شوند در Git فقط یک اشاره‌گر ~۱۳۰ بایتی هستند و این قانون حجم **واقعی** آن‌ها را نمی‌بیند. برای LFS از تنظیمات خود GitLab (محدودیت حجم LFS و repository) استفاده کنید.
+
+### ۱۶.۲ تشخیص فایل اجرایی ویندوز (`BLOCKED_SIGNATURE: pe`)
+
+نام فایل را می‌شود عوض کرد (`Mic.Caching.dll` → `readme.txt`)، ولی **محتوا** را نه. با `blocked_signatures: [pe]`، هر فایلی که header آن یک فایل اجرایی یا کتابخانه‌ی ویندوز باشد (exe، dll، sys، …) رد می‌شود، **هر نامی که داشته باشد**.
+
+```yaml
+namespaces:
+  finance:
+    refs:
+      "refs/heads/release/**":
+        blocked_signatures: [pe]
+```
+
+- تشخیص: `MZ` در ابتدای فایل **و** `PE\0\0` در آدرسی که در offset `0x3C` نوشته شده. فقط `MZ` کافی نیست، پس یک فایل متنی که با «MZ» شروع شود رد نمی‌شود (تست شده).
+- فقط **ابتدای** فایل (حداکثر ۶۴ KiB) استفاده می‌شود. ولی Git برای خواندن، هر شیء را کامل از حالت فشرده باز می‌کند، پس هزینه با حجم فایل‌های بررسی‌شده رشد می‌کند. به همین دلیل این قانون **فقط** برای کلاس‌هایی اجرا می‌شود که آن را فعال کرده‌اند (مثلاً شاخه‌های release) و در حالت پیش‌فرض خاموش است.
+
+### ۱۶.۳ اولین شاخه‌ی «سخت‌گیرتر» (تصمیم Q4)
+
+وقتی قوانین یک شاخه سخت‌گیرانه‌تر است (مثلاً `release/**` با `pe`)، **اولین** push به آن کلاس، تاریخچه‌ای را که هرگز با این قوانین بررسی نشده دوباره بررسی می‌کند. این عمدی است، چون جلوی ترفند «develop → release» را می‌گیرد.
+
+نتیجه‌ی عملی: اگر در تاریخچه‌ی `main`
+- فایل‌های قدیمی (legacy) هست که با قوانین release ممنوع‌اند، یا
+- فایلی هست که با استثنایی **فقط برای `main`** مجاز شده،
+
+آن‌وقت ساختن اولین شاخه‌ی release رد می‌شود و پیام دقیقاً فایل و commit را نشان می‌دهد. راه‌حل: پاک‌سازی تاریخچه، یا یک استثنای صریح برای `refs/heads/release/**`. از آن به بعد شاخه‌های release بعدی فقط محتوای جدید را بررسی می‌کنند.
+
+### ۱۶.۴ کارایی
+
+| سناریو | زمان کل push (محلی) |
+|---|---|
+| ۳۰۰ فایل جدید، هر کدام ۲۰ KiB | ۲۵۰ میلی‌ثانیه |
+| یک فایل ۱۹ MiB (رد از روی header) | ۱٫۰۷ ثانیه (عمدتاً انتقال داده) |
+
+تعداد پروسه‌های git ثابت است: یک `cat-file --batch-check` برای همه‌ی اندازه‌ها، و در صورت نیاز یک `cat-file --batch` برای امضاها.
+
+---
+
+## ۱۷. واژه‌نامه
 
 | واژه | معنی |
 |---|---|
@@ -812,4 +896,5 @@ docker exec -u root gitlab sh -c 'cp /var/opt/gitlab/git-policy/backup/01-block-
 | **explain** | شبیه‌سازی تصمیم policy برای یک push فرضی، بدون push واقعی |
 | **Quarantine** | پوشه‌ی موقتی که Git شیءهای push‌شده را تا پایان pre-receive در آن نگه می‌دارد |
 | **Audit mode (shadow)** | حالتی که تخلف فقط با `WOULD_REJECT` ثبت می‌شود و push رد نمی‌شود؛ برای rollout امن |
+| **امضای PE** | ساختار header فایل‌های اجرایی ویندوز (MZ … PE\0\0)؛ مستقل از نام فایل |
 | **کلاس سیاست** | مجموعه‌ی refهایی که قوانین محتوایی یکسان دارند؛ برای تعیین «قبلاً بررسی‌شده» استفاده می‌شود |

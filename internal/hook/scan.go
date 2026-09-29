@@ -74,6 +74,14 @@ func ScanPush(eng *engine.Engine, d *engine.Decision, req engine.Request, dir st
 			entries = append(entries, engine.PathEntry{Ref: e.Ref, Commit: e.Commit, Path: e.Path})
 		}
 		eng.CheckPaths(d, req, cls, entries)
+		if err := checkBlobs(ctx, eng, d, req, cls, git, dir, res.Entries); err != nil {
+			if errors.Is(err, context.DeadlineExceeded) {
+				d.Violations = append(d.Violations, engine.Violation{Code: policy.EvalTimeout, Source: "settings.limits.evaluation_timeout",
+					Detail: fmt.Sprintf("object inspection exceeded %s", timeout)})
+			} else {
+				d.Violations = append(d.Violations, engine.Violation{Code: policy.InternalError, Source: "gitscan", Detail: err.Error()})
+			}
+		}
 	case errors.As(err, &le):
 		// already recorded (unwaived) by OnLimit
 	case errors.Is(err, context.DeadlineExceeded):
@@ -83,4 +91,46 @@ func ScanPush(eng *engine.Engine, d *engine.Decision, req engine.Request, dir st
 		d.Violations = append(d.Violations, engine.Violation{Code: policy.InternalError, Source: "gitscan", Detail: err.Error()})
 	}
 	return out
+}
+
+// checkBlobs reads object sizes (headers only) for classes with a size
+// limit, and file heads for classes with signature rules, then applies them.
+func checkBlobs(ctx context.Context, eng *engine.Engine, d *engine.Decision, req engine.Request,
+	cls *engine.Classifier, git, dir string, entries []gitscan.Entry) error {
+	var sizeOIDs, headOIDs []string
+	for _, e := range entries {
+		c := cls.Content(cls.ClassOf(e.Ref))
+		if c.NeedsSizes() || c.NeedsHeads() {
+			sizeOIDs = append(sizeOIDs, e.Blob)
+		}
+		if c.NeedsHeads() {
+			headOIDs = append(headOIDs, e.Blob)
+		}
+	}
+	if len(sizeOIDs) == 0 {
+		return nil
+	}
+	sizes, err := gitscan.Sizes(ctx, git, dir, sizeOIDs)
+	if err != nil {
+		return err
+	}
+	var heads map[string][]byte
+	if len(headOIDs) > 0 {
+		if heads, err = gitscan.Heads(ctx, git, dir, headOIDs, engine.PEHeadSize); err != nil {
+			return err
+		}
+	}
+	blobs := make([]engine.BlobEntry, 0, len(entries))
+	for _, e := range entries {
+		size, ok := sizes[e.Blob]
+		if !ok {
+			continue // class without size/signature rules
+		}
+		blobs = append(blobs, engine.BlobEntry{
+			PathEntry: engine.PathEntry{Ref: e.Ref, Commit: e.Commit, Path: e.Path},
+			Blob:      e.Blob, Size: size, Head: heads[e.Blob],
+		})
+	}
+	eng.CheckBlobs(d, req, cls, blobs)
+	return nil
 }

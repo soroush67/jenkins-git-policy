@@ -202,7 +202,8 @@ func Run(l layout.Layout, env Env, stdin io.Reader, stderr io.Writer, now time.T
 	}
 	for _, v := range d.Violations {
 		it := message.Item{Rule: v.Code, Ref: v.Ref, File: v.Path}
-		if v.Code == policy.BlockedExtension || v.Code == policy.BlockedPath {
+		switch v.Code {
+		case policy.BlockedExtension, policy.BlockedPath, policy.BlockedSignature, policy.FileTooLarge:
 			it.Detail = v.Detail
 		}
 		if !IsZero(v.New) {
@@ -239,6 +240,9 @@ func violationFields(base map[string]any, v engine.Violation, extra map[string]a
 	}
 	if v.Path != "" {
 		f["file"] = v.Path
+	}
+	if v.Size > 0 {
+		f["size"] = v.Size
 	}
 	if v.Detail != "" {
 		f["detail"] = v.Detail
