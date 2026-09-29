@@ -3,7 +3,7 @@
 # راهنمای فارسی git-policy
 
 > نسخه نرم‌افزار: **v0.1.0** — نسخه schema سیاست: **`git-policy/v1`**
-> وضعیت: فازهای ۱ تا ۱۰ انجام شده و **همه روی GitLab واقعی (17.10.5) تست شده‌اند** (۸۵ از ۸۵). همه‌ی قوانین enforcement فعال‌اند و روی **همه‌ی commitهای جدید** هر push اجرا می‌شوند. audit log کامل است.
+> وضعیت: فازهای ۱ تا ۱۱ انجام شده و **همه روی GitLab واقعی (17.10.5) تست شده‌اند** (۸۵ از ۸۵). همه‌ی قوانین enforcement فعال‌اند و روی **همه‌ی commitهای جدید** هر push اجرا می‌شوند. audit log کامل است.
 >
 > 📘 **راهنمای کامل همه‌ی دستورات و گزینه‌ها:** [CLI-FA.md](CLI-FA.md)  — 📗 **۱۰ مثال:** [EXAMPLES-FA.md](EXAMPLES-FA.md)
 >
@@ -60,9 +60,10 @@ Jenkins (Control Plane) ──> فقط مدیریت: apply / enable / disable / 
 | ۷ | پسوند و مسیر فایل (DLL, EXE, ...)، حالت audit، بازنشسته کردن PoC | ✅ تأیید شده |
 | ۸ | حجم blob و امضای PE | ✅ تأیید شده |
 | ۹ | audit کامل: `log_accepted`، `required`، retention، فیلدهای SIEM | ✅ تأیید شده |
-| ۱۰ | همگام‌سازی عضویت گروه‌ها از GitLab با Jenkins، محافظ ایمنی، هشدار W010 | ✅ **انجام شده (منتظر تأیید)** |
+| ۱۰ | همگام‌سازی عضویت گروه‌ها از GitLab با Jenkins، محافظ ایمنی، هشدار W010 | ✅ تأیید شده |
+| ۱۱ | Jenkins با GitOps: job اصلی با ۱۳ اکشن، تأیید چهار چشم، job ‌GitOps، نصب کانال روی host | ✅ **انجام شده (منتظر تأیید)** |
 | lab | GitLab 17.10.5 + Jenkins + gp-ctl با docker-compose؛ تست همه‌ی فازها روی GitLab واقعی | ✅ **۸۵ از ۸۵** |
-| ۱۱ به بعد | pipeline کامل Jenkins، تست، امنیت، کارایی، مستندات | ⏳ |
+| ۱۲ به بعد | تست جامع، سخت‌سازی امنیتی، کارایی، مستندات تولید | ⏳ |
 
 > ✅ از فاز ۷ به بعد **git-policy خودش DLL/EXE و مسیرهای ممنوع را رد می‌کند.** PoC قدیمی (`01-block-dll`) تا زمانی که شما روی lab تأیید کنید دست‌نخورده می‌ماند و بعد با `admin retire-hook` بازنشسته می‌شود (بخش ۱۵.۵).
 
@@ -1150,6 +1151,7 @@ cd ~/infra/git-policy
 tools/build.sh all
 lab/up.sh                           # GitLab CE 17.10.5 + Jenkins + gp-ctl
 tests/gitlab/verify-gitlab.sh       # all phases on the real GitLab -> RESULT: 85 passed, 0 failed
+tests/gitlab/verify-jenkins.sh      # Phase 11: Jenkins + GitOps + approvals -> RESULT: 46 passed, 0 failed
 lab/down.sh                         # stop (data kept);  lab/down.sh --purge  deletes everything
 ```
 
@@ -1257,7 +1259,132 @@ git-policy validate --inventory inventory.json policy.yaml
 
 ---
 
-## ۲۰. واژه‌نامه
+## ۲۰. فاز ۱۱: Jenkins (رابط کاربری) با GitOps
+
+### ۲۰.۱ مدل کار
+
+<div dir="ltr">
+
+```
+توسعه‌دهنده‌ی policy ── MR ──> repo: platform/git-policy-config (main محافظت‌شده)
+                                   ├── test/policy.yaml
+                                   └── production/policy.yaml
+                                            │ push به main
+                                            ▼
+        Jenkins: git-policy-gitops (هر ۲ دقیقه poll یا webhook)
+           ├── validate هر دو فایل
+           ├── TEST: اعمال خودکار + بررسی sha256
+           └── PRODUCTION: فقط گزارش «drift» (UNSTABLE)
+                                            │ انسان
+                                            ▼
+        Jenkins: git-policy  ACTION=UPDATE_POLICY  ENVIRONMENT=PRODUCTION
+           validate → diff با نسخه‌ی فعال → تأیید نفر دوم → apply → بررسی sha256
+```
+
+</div>
+
+- **همه‌ی تغییرات policy در git است:** چه کسی، چه چیزی، کی، چرا (پیام commit و MR). rollback هم یعنی revert در git یا `ROLLBACK_POLICY`.
+- **`metadata.revision` باید در هر تغییر بالا برود.** سرور revision برابر یا کمتر را رد می‌کند (`V040`)، پس تاریخچه تصادفی بازنویسی نمی‌شود.
+- **Jenkins فقط مدیریت می‌کند.** اگر Jenkins خاموش باشد، enforcement ادامه دارد (TEST 17، تست‌شده).
+
+### ۲۰.۲ job اصلی: `git-policy`
+
+| پارامتر | توضیح |
+|---|---|
+| `ACTION` | `STATUS`، `VALIDATE_POLICY`، `UPDATE_POLICY`، `ENABLE`، `DISABLE`، `ROLLBACK_POLICY`، `BACKUP_POLICY`، `SYNC_GROUP_MEMBERSHIP`، `EXPLAIN`، `DEPLOY`، `RETIRE_HOOK`، `PRUNE_LOGS`، `EXPORT_LOGS` |
+| `ENVIRONMENT` | `TEST` یا `PRODUCTION` |
+| `REASON` | **الزامی برای هر تغییر** (۱۰ تا ۵۰۰ کاراکتر، یک خط)؛ در audit log ثبت می‌شود |
+| `POLICY_REF` | شاخه، تگ یا commit در repo policy (پیش‌فرض `main`) |
+| `DISABLE_TTL` | `30m` … `24h` |
+| `ROLLBACK_TO` | شماره‌ی نسخه (خالی = نسخه‌ی قبلی) |
+| `FORCE` | برای sync: عبور از محافظ ۳۰٪ |
+| `EXPLAIN_USER`، `EXPLAIN_PROJECT`، `EXPLAIN_REF`، `EXPLAIN_GROUPS` | برای `EXPLAIN` |
+| `HOOK_NAME` | برای `RETIRE_HOOK` |
+| `LOG_DATE` | برای `EXPORT_LOGS` |
+
+**چیزی که هر اکشن انجام می‌دهد و artifactهایی که در Jenkins ذخیره می‌شوند:**
+
+| اکشن | مراحل | artifact |
+|---|---|---|
+| `VALIDATE_POLICY` | checkout، validate با inventory گیت‌لب (W010)، validate دوم روی سرور با باینری مستقر‌شده | `validate.txt`، `validate.json`، `validate-server.json` |
+| `UPDATE_POLICY` | همان + **diff** با policy فعال + (PRODUCTION: تأیید) + apply + بررسی sha256 | + `policy.diff`، `policy.sha256` |
+| `BACKUP_POLICY` | tar.gz از policyها، state و membership | `git-policy-backup-<ENV>-<زمان>.tgz` + sha256 |
+| `EXPORT_LOGS` | audit log یک روز | `audit-<ENV>-<تاریخ>.jsonl` |
+| `EXPLAIN` | «چرا این push رد/قبول می‌شود؟» | `explain.json` |
+| `STATUS` | وضعیت کامل؛ CRITICAL → build ناپایدار (UNSTABLE) | `status.json` |
+
+### ۲۰.۳ تأیید در PRODUCTION (چهار چشم)
+
+- این اکشن‌ها در PRODUCTION قبل از اجرا **منتظر تأیید** می‌مانند: `UPDATE_POLICY`، `DISABLE`، `ROLLBACK_POLICY`، `DEPLOY`، `RETIRE_HOOK`، و `SYNC_GROUP_MEMBERSHIP` با `FORCE`.
+- فقط کاربران `GP_APPROVERS` می‌توانند تأیید کنند، حداکثر تا ۳۰ دقیقه.
+- **کسی که درخواست داده نمی‌تواند خودش تأیید کند.** اگر admin درخواست خودش را تأیید کند، build با پیام `four-eyes rule` شکست می‌خورد و هیچ چیزی اعمال نمی‌شود (تست شد).
+- نام درخواست‌کننده، commit و تأییدکننده در audit log سرور ثبت می‌شود، مثلاً:
+  `jenkins:git-policy#27 by:admin commit:9ea7e78c2b3d approved-by:approver`
+- `ENABLE` تأیید لازم ندارد، چون حفاظت را **برمی‌گرداند**.
+
+### ۲۰.۴-الف. نتیجه‌ی تست روی lab (۴۶ از ۴۶)
+
+- همه‌ی ۱۳ اکشن از طریق Jenkins اجرا شدند.
+- **GitOps:**
+  - push به repo منجر به اعمال خودکار روی TEST شد.
+  - policy نامعتبر (`20MB`) به سرور نرسید.
+  - تغییر بدون بالا بردن revision رد شد (`V040`).
+- **PRODUCTION:**
+  - تأیید توسط خود درخواست‌کننده رد شد (چهار چشم).
+  - تأیید توسط approver اعمال شد.
+  - رد کردن DISABLE توسط approver باعث ABORTED شد و موتور روشن ماند.
+- در لاگ هیچ build، هیچ token یا کلید خصوصی دیده نشد.
+
+**باگ‌هایی که فقط Jenkins واقعی نشان داد و رفع شدند:**
+- sandbox گرووی دسترسی پویا مثل `env[...]` و `.take()` را اجازه نمی‌دهد.
+- Jenkins پارامتر رشته‌ای **خالی** را به‌صورت متغیر محیطی تعریف نمی‌کند.
+- job ‌هایی که JCasC در لحظه‌ی بالا آمدن می‌سازد تا restart بعدی ثبت نمی‌شوند (`up.sh` خودکار حلش می‌کند).
+- `git-policy-ctl` بدون `SSH_CLIENT` با خطا متوقف می‌شد.
+
+> **نکته‌ی lab:** در lab فقط یک GitLab هست و TEST و PRODUCTION به همان اشاره می‌کنند. به همین دلیل job gitops همیشه «drift» گزارش می‌دهد، و revision فایل production باید از revision اعمال‌شده روی TEST بالاتر باشد. روی سرورهای واقعی جدا، این محدودیت وجود ندارد.
+
+### ۲۰.۴ job ‌های دیگر
+
+| job | کار |
+|---|---|
+| `git-policy-gitops` | GitOps: اعمال خودکار روی TEST و گزارش drift برای PRODUCTION |
+| `git-policy-sync-membership` | همگام‌سازی گروه‌ها هر ۱۵ دقیقه (فاز ۱۰) |
+| `git-policy-status` | وضعیت سریع (lab) |
+
+### ۲۰.۵ راه‌اندازی روی سرورهای واقعی
+
+**۱. روی Docker host گیت‌لب** (یک بار، با root):
+
+<div dir="ltr">
+
+```bash
+ssh-keygen -t ed25519 -N '' -f jenkins_ctl_key          # on a secure machine; private key -> Jenkins credential
+sudo deploy/install-ctl.sh --pubkey jenkins_ctl_key.pub --dry-run
+sudo deploy/install-ctl.sh --pubkey jenkins_ctl_key.pub
+ssh-keyscan -t ed25519 <gitlab-docker-host>            # -> known_hosts file for GP_SSH_KNOWN_HOSTS
+```
+
+</div>
+
+این اسکریپت کاربر `gitpolicy-deploy` را **بدون** عضویت در گروه docker می‌سازد و `git-policy-ctl` را نصب می‌کند. فایل sudoers را با `visudo -c` بررسی می‌کند و کلید را با forced command ثبت می‌کند. روی یک host شبیه‌سازی‌شده تست شده است.
+
+**۲. در Jenkins:**
+- **pluginها:** `workflow-aggregator`، `git`، `ssh-agent`، `credentials-binding`، `pipeline-utility-steps`، `timestamper`، `ws-cleanup`
+- **credentials:**
+  - `git-policy-ssh-test` و `git-policy-ssh-prod` (کلید SSH)
+  - `gitlab-api-readonly` (token با `read_api`)
+  - `git-policy-config-read` (deploy token گیت‌لب برای خواندن repo policy)
+- **متغیرهای سراسری** (Manage Jenkins → System → Global properties): فهرست کامل در سرآیند `jenkins/Jenkinsfile` است (`GP_POLICY_REPO`، `GP_CTL_TEST`، `GP_CTL_PRODUCTION`، `GP_APPROVERS`، `GP_BIN`، `GP_SSH_KNOWN_HOSTS`، …).
+- **دو job از نوع «Pipeline script from SCM»** روی repo همین پروژه: `jenkins/Jenkinsfile` با نام `git-policy`، و `jenkins/Jenkinsfile.gitops` با نام `git-policy-gitops`.
+- **باینری `git-policy` روی agent** (مسیر `GP_BIN`): از `tools/build.sh build` یا از artifact یک job ساخت.
+
+**۳. در GitLab:**
+- repo `platform/git-policy-config` با شاخه‌ی `main` محافظت‌شده و MR approval.
+- (اختیاری) webhook روی push به job `git-policy-gitops` به جای poll.
+
+---
+
+## ۲۱. واژه‌نامه
 
 | واژه | معنی |
 |---|---|

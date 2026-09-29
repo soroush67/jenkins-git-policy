@@ -1,0 +1,112 @@
+// git-policy GitOps loop.
+//
+// Watches the policy repository (GP_POLICY_REPO, branch main):
+//   test/policy.yaml        -> validated and APPLIED to TEST automatically
+//   production/policy.yaml  -> validated; if it differs from what PRODUCTION
+//                              runs, the build is UNSTABLE ("drift") and a
+//                              human promotes it with the git-policy job
+//                              (ACTION=UPDATE_POLICY, ENVIRONMENT=PRODUCTION,
+//                              which requires a second person's approval).
+//
+// A change must bump metadata.revision: the server refuses re-applying an
+// equal or lower revision (V040), so history can't be overwritten by accident.
+// Uses the same global variables as the main Jenkinsfile.
+
+pipeline {
+    agent any
+    triggers { pollSCM('H/2 * * * *') }   // or a GitLab push webhook calling this job
+    options {
+        timestamps()
+        disableConcurrentBuilds()
+        timeout(time: 30, unit: 'MINUTES')
+        buildDiscarder(logRotator(numToKeepStr: '200'))
+    }
+    stages {
+        stage('Checkout policy repository') {
+            steps {
+                dir('policy') {
+                    checkout([$class: 'GitSCM', branches: [[name: 'main']],
+                              userRemoteConfigs: [[url: env.GP_POLICY_REPO, credentialsId: env.GP_POLICY_REPO_CRED]]])
+                }
+                script {
+                    env.GP_POLICY_COMMIT = sh(returnStdout: true, script: 'git -C policy rev-parse HEAD').trim()
+                    env.GP_ACTOR = "jenkins:${env.JOB_NAME}#${env.BUILD_NUMBER} gitops commit:${env.GP_POLICY_COMMIT.substring(0, 12)}"
+                    env.GP_REASON = "GitOps: policy repository commit ${env.GP_POLICY_COMMIT.substring(0, 12)}"
+                    currentBuild.description = "commit ${env.GP_POLICY_COMMIT.substring(0, 12)}"
+                }
+                writeFile file: '.gp/ctl.sh', text: '''
+                    b64() { printf '%s' "$1" | base64 -w0; }
+                    if [ -n "${GP_SSH_KNOWN_HOSTS:-}" ]; then
+                        GP_SSH_OPTS="-o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$GP_SSH_KNOWN_HOSTS"
+                    else
+                        GP_SSH_OPTS="-o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR"
+                    fi
+                    ctl() { ssh $GP_SSH_OPTS "$GP_CTL" "$*"; }
+                    who() { printf -- '--actor-b64=%s --reason-b64=%s' "$(b64 "$GP_ACTOR")" "$(b64 "$GP_REASON")"; }
+                '''
+            }
+        }
+
+        stage('Validate both environments') {
+            steps {
+                withCredentials([string(credentialsId: env.GP_GITLAB_TOKEN_TEST, variable: 'GITLAB_TOKEN')]) {
+                    sh '''
+                        set -eu
+                        for e in test production; do
+                            f="policy/$e/policy.yaml"
+                            [ -f "$f" ] || { echo "missing $f"; exit 1; }
+                            echo "=== $f"
+                            "$GP_BIN" validate "$f"
+                        done
+                    '''
+                }
+            }
+        }
+
+        stage('Apply to TEST') {
+            environment {
+                GP_CTL = "${env.GP_CTL_TEST}"
+            }
+            steps {
+                sshagent(credentials: [env.GP_SSH_CRED_TEST]) {
+                    sh '''
+                        set -eu; . .gp/ctl.sh
+                        want=$(sha256sum policy/test/policy.yaml | cut -d' ' -f1)
+                        have=$(ctl status --json | python3 -c 'import json,sys; print(json.load(sys.stdin)["policy"].get("source_sha256",""))') || true
+                        if [ "$want" = "$have" ]; then echo "TEST already runs this policy ($want)"; exit 0; fi
+                        echo "TEST runs ${have:-nothing}; applying $want"
+                        ctl "apply $(who)" < policy/test/policy.yaml
+                        have=$(ctl status --json | python3 -c 'import json,sys; print(json.load(sys.stdin)["policy"].get("source_sha256",""))') || true
+                        [ "$want" = "$have" ] || { echo "VERIFY FAILED on TEST"; exit 1; }
+                        echo "TEST now runs $want"
+                    '''
+                }
+            }
+        }
+
+        stage('PRODUCTION drift check') {
+            environment {
+                GP_CTL = "${env.GP_CTL_PRODUCTION}"
+            }
+            steps {
+                sshagent(credentials: [env.GP_SSH_CRED_PRODUCTION]) {
+                    script {
+                        def drift = sh(returnStatus: true, script: '''
+                            set -eu; . .gp/ctl.sh
+                            want=$(sha256sum policy/production/policy.yaml | cut -d' ' -f1)
+                            have=$(ctl status --json | python3 -c 'import json,sys; print(json.load(sys.stdin)["policy"].get("source_sha256",""))') || true
+                            echo "PRODUCTION repository: $want"
+                            echo "PRODUCTION running:    ${have:-nothing}"
+                            [ "$want" = "$have" ]
+                        ''')
+                        if (drift != 0) {
+                            unstable('PRODUCTION drift: the repository differs from what PRODUCTION runs. ' +
+                                     'Promote with job git-policy: ACTION=UPDATE_POLICY ENVIRONMENT=PRODUCTION (approval required).')
+                        }
+                    }
+                }
+            }
+        }
+    }
+    post { cleanup { cleanWs() } }
+}

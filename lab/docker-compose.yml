@@ -66,7 +66,8 @@ services:
       - jenkins-home:/var/jenkins_home
       - ./ctl/jenkins_ctl_key:/run/secrets/git-policy-ssh-key:ro
       - ./.gitlab-token:/run/secrets/gitlab-api-token:ro
-      - ../dist:/opt/git-policy:ro     # lab: the built binary for the Jenkins agent (Phase 11 builds it in the pipeline)
+      - ../dist:/opt/git-policy:ro             # the built binary for the Jenkins agent (GP_BIN)
+      - ../jenkins:/opt/git-policy-jenkins:ro  # the product pipelines (Jenkinsfile, Jenkinsfile.gitops)
 
 volumes:
   gitlab-config:

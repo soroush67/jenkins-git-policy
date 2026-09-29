@@ -1,0 +1,19 @@
+# PRODUCTION environment policy (promoted through Jenkins with approval).
+# Starts in audit (shadow) mode: violations are logged as WOULD_REJECT.
+apiVersion: git-policy/v1
+kind: GitPolicy
+metadata:
+  name: org-policy-production
+  revision: 1
+settings:
+  mode: audit
+  audit: {log_accepted: true}
+  messages:
+    support: "Help: #devops-help"
+mandatory:
+  mode: audit
+  blocked_extensions: [dll, exe]
+  max_file_size: 50MiB
+defaults:
+  blocked_extensions: [pdb, nupkg]
+  max_file_size: 20MiB

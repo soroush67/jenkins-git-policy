@@ -38,6 +38,15 @@ echo "==> starting gp-ctl and Jenkins"
 install -m 0755 ../deploy/git-policy-ctl ctl/git-policy-ctl   # build context copy (source: deploy/)
 "${DC[@]}" up -d --build gp-ctl jenkins
 until curl -fsS -o /dev/null http://localhost:8081/login; do sleep 5; printf '.'; done; echo " Jenkins up"
+# Jobs created by JCasC while Jenkins is still loading jobs from disk are
+# written but not registered until the next start: restart once if needed.
+JPW=$(grep '^JENKINS_ADMIN_PASSWORD=' .env | cut -d= -f2-)
+sleep 5
+if ! curl -fsS -u "admin:$JPW" http://localhost:8081/job/git-policy/api/json >/dev/null 2>&1; then
+    docker restart gp-jenkins >/dev/null
+    until curl -fsS -o /dev/null http://localhost:8081/login 2>/dev/null; do sleep 5; printf '.'; done; echo " Jenkins restarted (jobs registered)"
+fi
+./seed-policy-repo.sh || echo "WARNING: policy repository not seeded (see message above)"
 
 cat <<MSG
 

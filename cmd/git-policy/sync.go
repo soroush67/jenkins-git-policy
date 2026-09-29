@@ -166,3 +166,36 @@ func loadInventory(path string) (*policy.Inventory, error) {
 	}
 	return policy.NewInventory(inv.Users, inv.Groups, inv.Projects), nil
 }
+
+// cmdShowPolicy prints the stored source (policy.yaml) of the active or a
+// given version — exactly the approved text, used by Jenkins for diffs.
+func cmdShowPolicy(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("show-policy", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	root := fs.String("root", layout.DefaultRoot, "installation root")
+	ver := fs.Int("version", 0, "stored version number (default: active)")
+	if err := fs.Parse(args); err != nil || fs.NArg() != 0 || *ver < 0 {
+		return exitUsage
+	}
+	l := layout.New(*root)
+	n := *ver
+	if n == 0 {
+		act, err := store.LoadActive(l)
+		if err != nil {
+			fmt.Fprintf(stderr, "git-policy: no active policy: %v\n", err)
+			return exitInvalid
+		}
+		n = act.Version
+	}
+	if _, err := store.LoadVersion(l, n); err != nil { // verifies integrity first
+		fmt.Fprintf(stderr, "git-policy: %v\n", err)
+		return exitInvalid
+	}
+	b, err := os.ReadFile(l.VersionDir(n) + "/policy.yaml")
+	if err != nil {
+		fmt.Fprintf(stderr, "git-policy: %v\n", err)
+		return exitInvalid
+	}
+	stdout.Write(b)
+	return exitOK
+}

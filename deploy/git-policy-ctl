@@ -28,7 +28,7 @@ MAX_MEMBERSHIP=$((64 * 1024 * 1024))
 MAX_BINARY=$((128 * 1024 * 1024))
 
 die() { printf 'git-policy-ctl: %s\n' "$*" >&2; log "DENIED $*"; exit 2; }
-log() { printf '%s client=%s %s\n' "$(date -u +%FT%TZ)" "${SSH_CLIENT%% *}" "$*" >> "$LOG" 2>/dev/null || true; }
+log() { local c=${SSH_CLIENT:-local}; printf '%s client=%s %s\n' "$(date -u +%FT%TZ)" "${c%% *}" "$*" >> "$LOG" 2>/dev/null || true; }
 
 usage() {
     cat >&2 <<'EOF'
@@ -42,6 +42,7 @@ verbs:
   enable   --actor-b64=B --reason-b64=B
   disable  --actor-b64=B --reason-b64=B --ttl=D
   groups                                     (groups the active policy depends on)
+  show-policy [--version=N]                  (stored policy.yaml, for diffs)
   apply-membership --actor-b64=B [--force]   (membership JSON on stdin)
   retire-hook --actor-b64=B --name=FILE
   deploy   --actor-b64=B --sha256=HEX        (linux/amd64 binary on stdin)
@@ -153,6 +154,9 @@ case "$VERB" in
         gp admin disable --actor "$actor" --reason "$reason" --ttl "${OPT[ttl]}" ;;
     groups)
         only; gp groups ;;
+    show-policy)
+        only version; may version '^[1-9][0-9]{0,5}$'
+        if [ -n "${OPT[version]+x}" ]; then gp show-policy --version "${OPT[version]}"; else gp show-policy; fi ;;
     apply-membership)
         only actor-b64 force; may force '^true$'
         actor=$(text actor)

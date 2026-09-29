@@ -1,0 +1,18 @@
+# TEST environment policy (applied automatically after every push to main).
+apiVersion: git-policy/v1
+kind: GitPolicy
+metadata:
+  name: org-policy-test
+  revision: 1
+settings:
+  audit: {log_accepted: true}
+  messages:
+    support: "Help: #devops-help"
+    remediation:
+      BLOCKED_EXTENSION: "Publish binary dependencies as NuGet packages to Nexus instead of committing them."
+mandatory:
+  blocked_extensions: [dll, exe]
+  max_file_size: 50MiB
+defaults:
+  blocked_extensions: [pdb, nupkg]
+  max_file_size: 20MiB

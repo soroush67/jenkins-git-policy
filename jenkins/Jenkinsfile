@@ -1,0 +1,318 @@
+// git-policy control plane.
+//
+// Jenkins MANAGES git-policy; it never evaluates pushes. Enforcement runs on
+// the GitLab server and keeps working when Jenkins is down.
+//
+// GitOps: policies live in a Git repository (GP_POLICY_REPO):
+//   test/policy.yaml         applied to TEST (also automatically by Jenkinsfile.gitops)
+//   production/policy.yaml   applied to PRODUCTION only through this pipeline, with approval
+//
+// Every server operation goes through the git-policy-ctl SSH forced command
+// (deploy/git-policy-ctl): Jenkins has no shell or docker access on the host.
+//
+// Required Jenkins global environment variables (Manage Jenkins > System):
+//   GP_POLICY_REPO, GP_POLICY_REPO_CRED          policy repository URL + read credential
+//   GP_CTL_TEST, GP_CTL_PRODUCTION               gitpolicy-deploy@<docker-host>
+//   GP_SSH_CRED_TEST, GP_SSH_CRED_PRODUCTION     SSH key credential ids for the ctl channel
+//   GP_GITLAB_URL_TEST, GP_GITLAB_URL_PRODUCTION GitLab base URLs (API)
+//   GP_GITLAB_TOKEN_TEST, GP_GITLAB_TOKEN_PRODUCTION  secret-text credential ids (read_api)
+//   GP_APPROVERS                                 Jenkins users/groups allowed to approve PRODUCTION changes
+//   GP_BIN                                       git-policy binary on the agent
+//   GP_SSH_KNOWN_HOSTS (optional)                known_hosts file pinning the ctl hosts
+
+// Actions that change something on the server. (Binding variables, not "def":
+// they must be visible inside when { expression { ... } } closures.)
+MUTATING = ['UPDATE_POLICY', 'ENABLE', 'DISABLE', 'ROLLBACK_POLICY', 'SYNC_GROUP_MEMBERSHIP',
+                'DEPLOY', 'RETIRE_HOOK', 'PRUNE_LOGS']
+// Actions that need a second person in PRODUCTION.
+NEEDS_APPROVAL = ['UPDATE_POLICY', 'DISABLE', 'ROLLBACK_POLICY', 'DEPLOY', 'RETIRE_HOOK']
+
+pipeline {
+    agent any
+    options {
+        timestamps()
+        disableConcurrentBuilds()
+        timeout(time: 90, unit: 'MINUTES')
+        buildDiscarder(logRotator(numToKeepStr: '200', artifactNumToKeepStr: '100'))
+    }
+    parameters {
+        choice(name: 'ACTION', choices: ['STATUS', 'VALIDATE_POLICY', 'UPDATE_POLICY', 'ENABLE', 'DISABLE',
+            'ROLLBACK_POLICY', 'BACKUP_POLICY', 'SYNC_GROUP_MEMBERSHIP', 'EXPLAIN', 'DEPLOY', 'RETIRE_HOOK',
+            'PRUNE_LOGS', 'EXPORT_LOGS'], description: 'What to do')
+        choice(name: 'ENVIRONMENT', choices: ['TEST', 'PRODUCTION'], description: 'Target GitLab')
+        string(name: 'REASON', defaultValue: '', description: 'Why (10-500 characters). Required for every change; recorded in the audit log.')
+        string(name: 'POLICY_REF', defaultValue: 'main', description: 'VALIDATE/UPDATE: branch, tag or commit of the policy repository')
+        choice(name: 'DISABLE_TTL', choices: ['30m', '1h', '2h', '4h', '8h', '24h'], description: 'DISABLE: the engine re-enables itself after this')
+        string(name: 'ROLLBACK_TO', defaultValue: '', description: 'ROLLBACK_POLICY: version number (empty = previous version)')
+        booleanParam(name: 'FORCE', defaultValue: false, description: 'SYNC_GROUP_MEMBERSHIP: override the >30% drop guard (approval required in PRODUCTION)')
+        string(name: 'EXPLAIN_USER', defaultValue: '', description: 'EXPLAIN: GitLab username')
+        string(name: 'EXPLAIN_PROJECT', defaultValue: '', description: 'EXPLAIN: group/project')
+        string(name: 'EXPLAIN_REF', defaultValue: 'refs/heads/main', description: 'EXPLAIN: full ref')
+        string(name: 'EXPLAIN_GROUPS', defaultValue: '', description: 'EXPLAIN: groups (comma separated; empty = membership cache)')
+        string(name: 'HOOK_NAME', defaultValue: '', description: 'RETIRE_HOOK: file name in pre-receive.d, e.g. 01-block-dll')
+        string(name: 'LOG_DATE', defaultValue: '', description: 'EXPORT_LOGS: YYYY-MM-DD (empty = today, UTC)')
+    }
+
+    stages {
+        stage('Prepare') {
+            steps {
+                script {
+                    def e = params.ENVIRONMENT
+                    // Explicit map (the Groovy sandbox forbids dynamic env[...] lookups).
+                    def settings = [
+                        TEST: [ctl: env.GP_CTL_TEST, ssh: env.GP_SSH_CRED_TEST, url: env.GP_GITLAB_URL_TEST,
+                               token: env.GP_GITLAB_TOKEN_TEST, file: 'test/policy.yaml'],
+                        PRODUCTION: [ctl: env.GP_CTL_PRODUCTION, ssh: env.GP_SSH_CRED_PRODUCTION, url: env.GP_GITLAB_URL_PRODUCTION,
+                               token: env.GP_GITLAB_TOKEN_PRODUCTION, file: 'production/policy.yaml'],
+                    ].get(e)
+                    for (k in ['ctl', 'ssh', 'url', 'token']) {
+                        if (!settings.get(k)) { error("Jenkins global variables for ${e} are incomplete (${k}); see the Jenkinsfile header") }
+                    }
+                    if (!env.GP_BIN || !env.GP_APPROVERS || !env.GP_POLICY_REPO || !env.GP_POLICY_REPO_CRED) {
+                        error('Jenkins global variables GP_BIN, GP_APPROVERS, GP_POLICY_REPO, GP_POLICY_REPO_CRED are required')
+                    }
+                    env.GP_CTL = settings.get('ctl')
+                    env.GP_SSH_CRED = settings.get('ssh')
+                    env.GP_GITLAB_URL = settings.get('url')
+                    env.GP_GITLAB_TOKEN_CRED = settings.get('token')
+                    env.GP_POLICY_FILE = settings.get('file')
+
+                    if (!(env.GP_CTL ==~ /^[a-z_][a-z0-9_-]*@[A-Za-z0-9.-]+$/)) { error('GP_CTL_* must look like user@host') }
+                    def reason = (params.REASON ?: '').trim()
+                    if (params.ACTION in MUTATING) {
+                        if (reason.length() < 10 || reason.length() > 500 || reason ==~ /(?s).*[\x00-\x1f\x7f].*/) {
+                            error('REASON is required for changes: 10-500 characters, one line')
+                        }
+                    }
+                    def check = { String name, String value, String re ->
+                        if (value && !(value ==~ re)) { error("invalid ${name}: ${value}") }
+                    }
+                    check('POLICY_REF', params.POLICY_REF, /^[A-Za-z0-9._\/-]{1,100}$/)
+                    check('ROLLBACK_TO', params.ROLLBACK_TO, /^[0-9]{1,6}$/)
+                    check('EXPLAIN_USER', params.EXPLAIN_USER, /^[A-Za-z0-9_][A-Za-z0-9_.-]{0,254}$/)
+                    check('EXPLAIN_PROJECT', params.EXPLAIN_PROJECT, /^[A-Za-z0-9_][A-Za-z0-9_.\/-]{0,1023}$/)
+                    check('EXPLAIN_REF', params.EXPLAIN_REF, /^refs\/[A-Za-z0-9._\/@+-]{1,250}$/)
+                    check('EXPLAIN_GROUPS', params.EXPLAIN_GROUPS, /^[A-Za-z0-9_][A-Za-z0-9_.\/,-]{0,1000}$/)
+                    check('HOOK_NAME', params.HOOK_NAME, /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/)
+                    check('LOG_DATE', params.LOG_DATE, /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/)
+                    if (params.ACTION == 'EXPLAIN' && !params.EXPLAIN_PROJECT) { error('EXPLAIN needs EXPLAIN_PROJECT') }
+                    if (params.ACTION == 'RETIRE_HOOK' && !params.HOOK_NAME) { error('RETIRE_HOOK needs HOOK_NAME') }
+
+                    def causes = currentBuild.getBuildCauses('hudson.model.Cause$UserIdCause')
+                    env.GP_REQUESTER = causes ? causes.get(0).get('userId') : 'system'
+                    env.GP_ACTOR = "jenkins:${env.JOB_NAME}#${env.BUILD_NUMBER} by:${env.GP_REQUESTER}"
+                    env.GP_REASON = reason
+                    currentBuild.description = "${params.ACTION} ${e}" + (reason ? " — ${reason}" : '')
+                }
+                // ctl helper for every later sh step; values reach it only as environment variables.
+        // Note: Jenkins does not export EMPTY string parameters, so optional ones are read as ${X:-}.
+                writeFile file: '.gp/ctl.sh', text: '''
+                    b64() { printf '%s' "$1" | base64 -w0; }
+                    if [ -n "${GP_SSH_KNOWN_HOSTS:-}" ]; then
+                        GP_SSH_OPTS="-o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$GP_SSH_KNOWN_HOSTS"
+                    else
+                        GP_SSH_OPTS="-o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR"
+                    fi
+                    ctl() { ssh $GP_SSH_OPTS "$GP_CTL" "$*"; }
+                    who() { printf -- '--actor-b64=%s --reason-b64=%s' "$(b64 "$GP_ACTOR")" "$(b64 "$GP_REASON")"; }
+                '''
+            }
+        }
+
+        stage('Checkout policy') {
+            when { expression { params.ACTION in ['VALIDATE_POLICY', 'UPDATE_POLICY'] } }
+            steps {
+                dir('policy') {
+                    checkout([$class: 'GitSCM', branches: [[name: params.POLICY_REF]],
+                              userRemoteConfigs: [[url: env.GP_POLICY_REPO, credentialsId: env.GP_POLICY_REPO_CRED]]])
+                }
+                script {
+                    env.GP_POLICY_COMMIT = sh(returnStdout: true, script: 'git -C policy rev-parse HEAD').trim()
+                    if (!fileExists("policy/${env.GP_POLICY_FILE}")) { error("${env.GP_POLICY_FILE} not found in the policy repository") }
+                    env.GP_ACTOR = "${env.GP_ACTOR} commit:${env.GP_POLICY_COMMIT.substring(0, 12)}"
+                }
+            }
+        }
+
+        stage('Validate') {
+            when { expression { params.ACTION in ['VALIDATE_POLICY', 'UPDATE_POLICY'] } }
+            steps {
+                withCredentials([string(credentialsId: env.GP_GITLAB_TOKEN_CRED, variable: 'GITLAB_TOKEN')]) {
+                    sh '''
+                        set -eu
+                        f="policy/$GP_POLICY_FILE"
+                        echo "policy file: $f (commit $GP_POLICY_COMMIT)"
+                        inv=""
+                        if "$GP_BIN" sync-membership --gitlab-url "$GP_GITLAB_URL" --policy "$f" -o /dev/null --inventory-out inventory.json; then
+                            inv="--inventory inventory.json"
+                        else
+                            echo "WARNING: GitLab inventory unavailable: validating without W010 checks"
+                        fi
+                        "$GP_BIN" validate $inv "$f" | tee validate.txt
+                        "$GP_BIN" validate --json $inv "$f" > validate.json
+                        sha256sum "$f" | cut -d' ' -f1 > policy.sha256
+                    '''
+                }
+                sshagent(credentials: [env.GP_SSH_CRED]) {
+                    // Second, independent check with the binary deployed on the server (catches version skew).
+                    sh '. .gp/ctl.sh; ctl validate < "policy/$GP_POLICY_FILE" > validate-server.json'
+                }
+            }
+        }
+
+        stage('Diff') {
+            when { expression { params.ACTION == 'UPDATE_POLICY' } }
+            steps {
+                sshagent(credentials: [env.GP_SSH_CRED]) {
+                    sh '''
+                        . .gp/ctl.sh
+                        ctl show-policy > active.yaml 2>/dev/null || : > active.yaml
+                        echo "=== change to $GP_POLICY_FILE on $ENVIRONMENT (active -> new) ==="
+                        diff -u --label active --label "new@${GP_POLICY_COMMIT%${GP_POLICY_COMMIT#????????????}}" active.yaml "policy/$GP_POLICY_FILE" | tee policy.diff || true
+                        if [ ! -s policy.diff ]; then echo "no change: the active policy already equals this file"; fi
+                    '''
+                }
+            }
+        }
+
+        stage('Approval') {
+            when { expression { params.ENVIRONMENT == 'PRODUCTION' && (params.ACTION in NEEDS_APPROVAL || (params.ACTION == 'SYNC_GROUP_MEMBERSHIP' && params.FORCE)) } }
+            steps {
+                script {
+                    def approver
+                    timeout(time: 30, unit: 'MINUTES') {
+                        approver = input(id: 'Approve', ok: 'Approve',
+                            message: "PRODUCTION ${params.ACTION} requested by ${env.GP_REQUESTER}: ${env.GP_REASON}",
+                            submitter: env.GP_APPROVERS, submitterParameter: 'APPROVER')
+                    }
+                    if (approver == env.GP_REQUESTER) {
+                        error("four-eyes rule: ${approver} cannot approve their own request")
+                    }
+                    env.GP_ACTOR = "${env.GP_ACTOR} approved-by:${approver}"
+                    echo "approved by ${approver}"
+                }
+            }
+        }
+
+        stage('Execute') {
+            steps {
+                sshagent(credentials: [env.GP_SSH_CRED]) {
+                    withCredentials([string(credentialsId: env.GP_GITLAB_TOKEN_CRED, variable: 'GITLAB_TOKEN')]) {
+                        script {
+                            switch (params.ACTION) {
+                                case 'STATUS':
+                                    def rc = sh(returnStatus: true, script: '. .gp/ctl.sh; ctl status; ctl status --json > status.json || true')
+                                    if (rc == 3) { unstable('git-policy health is CRITICAL') }
+                                    break
+                                case 'VALIDATE_POLICY':
+                                    echo 'policy is valid (see validate.txt / validate-server.json)'
+                                    break
+                                case 'UPDATE_POLICY':
+                                    sh '''
+                                        set -eu; . .gp/ctl.sh
+                                        if [ ! -s policy.diff ]; then echo "nothing to apply"; exit 0; fi
+                                        ctl "apply $(who)" < "policy/$GP_POLICY_FILE"
+                                        want=$(cat policy.sha256)
+                                        got=$(ctl status --json | python3 -c 'import json,sys; print(json.load(sys.stdin)["policy"].get("source_sha256",""))') || true
+                                        [ "$got" = "$want" ] || { echo "VERIFY FAILED: active sha256 $got != $want"; exit 1; }
+                                        echo "verified: active policy sha256 $got"
+                                    '''
+                                    break
+                                case 'ENABLE':
+                                    sh 'set -eu; . .gp/ctl.sh; ctl "enable $(who)"; ctl status --json | grep -q \'"enforcing": true\''
+                                    break
+                                case 'DISABLE':
+                                    sh 'set -eu; . .gp/ctl.sh; ctl "disable $(who) --ttl=$DISABLE_TTL"; ctl status | head -4'
+                                    break
+                                case 'ROLLBACK_POLICY':
+                                    sh '''
+                                        set -eu; . .gp/ctl.sh
+                                        ctl versions
+                                        to=""; [ -n "${ROLLBACK_TO:-}" ] && to=" --to=$ROLLBACK_TO"
+                                        ctl "rollback $(who)$to"
+                                        ctl status | sed -n '1,12p'
+                                    '''
+                                    break
+                                case 'BACKUP_POLICY':
+                                    sh '''
+                                        set -eu; . .gp/ctl.sh
+                                        f="git-policy-backup-$ENVIRONMENT-$(date -u +%Y%m%dT%H%M%SZ).tgz"
+                                        ctl backup > "$f"
+                                        tar -tzf "$f" | grep -q policies/ACTIVE
+                                        sha256sum "$f" | tee "$f.sha256"
+                                    '''
+                                    break
+                                case 'SYNC_GROUP_MEMBERSHIP':
+                                    sh '''
+                                        set -eu; . .gp/ctl.sh
+                                        groups=$(ctl groups)
+                                        if [ -z "$groups" ]; then echo "active policy uses no groups: nothing to sync"; exit 0; fi
+                                        "$GP_BIN" sync-membership --gitlab-url "$GP_GITLAB_URL" --groups "$groups" -o membership.json
+                                        force=""; if [ "${FORCE:-false}" = true ]; then force=" --force"; fi
+                                        ctl "apply-membership --actor-b64=$(b64 "$GP_ACTOR")$force" < membership.json
+                                        rm -f membership.json
+                                    '''
+                                    break
+                                case 'EXPLAIN':
+                                    sh '''
+                                        set -eu; . .gp/ctl.sh
+                                        args="--project=$EXPLAIN_PROJECT --ref=${EXPLAIN_REF:-refs/heads/main}"
+                                        [ -n "${EXPLAIN_USER:-}" ] && args="$args --user=$EXPLAIN_USER"
+                                        [ -n "${EXPLAIN_GROUPS:-}" ] && args="$args --groups=$EXPLAIN_GROUPS"
+                                        ctl "explain $args" > explain.json
+                                        python3 - <<'PY'
+import json
+r = json.load(open("explain.json"))
+print("verdict:", r["verdict"])
+print("user:", r["user"], " groups:", ",".join(r.get("groups") or []) or "-")
+for c in (r["identity"].get("candidates") or []):
+    print("  identity rule:", c["Action"], c["Source"])
+for v in r.get("violations") or []:
+    print("  violation:", v["Code"], v["Source"])
+c = r["content"]
+print("blocked extensions:", ", ".join(sorted(c["extensions"])) or "-")
+print("max file size:", c["max_file_size"], "bytes")
+PY
+                                    '''
+                                    break
+                                case 'DEPLOY':
+                                    sh '''
+                                        set -eu; . .gp/ctl.sh
+                                        sum=$(sha256sum "$GP_BIN" | cut -d' ' -f1)
+                                        "$GP_BIN" version
+                                        ctl "deploy --actor-b64=$(b64 "$GP_ACTOR") --sha256=$sum" < "$GP_BIN"
+                                        ctl status | sed -n '1,8p'
+                                    '''
+                                    break
+                                case 'RETIRE_HOOK':
+                                    sh 'set -eu; . .gp/ctl.sh; ctl "retire-hook --actor-b64=$(b64 "$GP_ACTOR") --name=$HOOK_NAME"'
+                                    break
+                                case 'PRUNE_LOGS':
+                                    sh 'set -eu; . .gp/ctl.sh; ctl "prune-logs --actor-b64=$(b64 "$GP_ACTOR")"'
+                                    break
+                                case 'EXPORT_LOGS':
+                                    sh '''
+                                        set -eu; . .gp/ctl.sh
+                                        d=${LOG_DATE:-$(date -u +%F)}
+                                        ctl "logs --date=$d" > "audit-$ENVIRONMENT-$d.jsonl"
+                                        echo "$(wc -l < "audit-$ENVIRONMENT-$d.jsonl") events"
+                                    '''
+                                    break
+                                default:
+                                    error("unknown ACTION ${params.ACTION}")
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            archiveArtifacts allowEmptyArchive: true, fingerprint: true,
+                artifacts: 'validate*.txt, validate*.json, policy.diff, policy.sha256, status.json, explain.json, git-policy-backup-*, audit-*.jsonl'
+        }
+        cleanup { cleanWs() }
+    }
+}

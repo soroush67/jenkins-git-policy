@@ -34,6 +34,7 @@ Usage:
   git-policy explain  --project PATH [--user NAME] [--groups a,b] [--ref REF] [--policy FILE] [--json]
   git-policy scan     [--policy FILE] [--project PATH] [--repo DIR] [--json] < ref-updates   (diagnostics)
   git-policy groups   [--policy FILE] [--root DIR]  groups the policy depends on
+  git-policy show-policy [--version N] [--root DIR] stored policy.yaml of the active (or given) version
   git-policy sync-membership --gitlab-url URL (--policy FILE | --groups LIST) [-o FILE]
                       [--inventory-out FILE] [--token-file F | $GITLAB_TOKEN] [--ca-file F] [--insecure]
   git-policy hook     [--root DIR]                 (run by the pre-receive wrapper)
@@ -80,6 +81,8 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return cmdScan(args[1:], stdin, stdout, stderr)
 	case "groups":
 		return cmdGroups(args[1:], stdout, stderr)
+	case "show-policy":
+		return cmdShowPolicy(args[1:], stdout, stderr)
 	case "sync-membership":
 		return cmdSyncMembership(args[1:], stdout, stderr)
 	case "admin":

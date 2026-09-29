@@ -229,6 +229,12 @@ echo "<old-sha> <new-sha> refs/heads/main" | git-policy scan --policy p.yaml --p
 
 ---
 
+### `git-policy show-policy [--version N] [--root DIR]`
+
+متن **دقیق** `policy.yaml` نسخه‌ی فعال (یا نسخه‌ی `N`) را چاپ می‌کند؛ Jenkins از آن برای diff استفاده می‌کند. قبل از چاپ، checksum نسخه بررسی می‌شود.
+
+---
+
 ### `git-policy hook [--root DIR]`
 
 همان دستوری که hook گیت‌لب اجرا می‌کند. **به‌صورت دستی استفاده نمی‌شود.** stdin را از Git و متغیرهای `GL_*` را از Gitaly می‌گیرد.
@@ -455,6 +461,7 @@ Jenkins هیچ دسترسی مستقیمی به docker یا shell سرور ند�
 | `enable` | `--actor-b64 --reason-b64` | — | `admin enable` |
 | `disable` | `--actor-b64 --reason-b64 --ttl=2h` | — | `admin disable` |
 | `groups` | — | فهرست گروه‌ها | `groups` |
+| `show-policy` | `[--version=N]` | policy.yaml ذخیره‌شده | `show-policy` |
 | `apply-membership` | `--actor-b64 [--force]` | JSON عضویت روی stdin | `admin apply-membership -` |
 | `retire-hook` | `--actor-b64 --name=FILE` | — | `admin retire-hook` |
 | `deploy` | `--actor-b64 --sha256=HEX` | باینری روی stdin | کپی به کانتینر، بررسی sha256 دو بار، سپس `admin install` |
@@ -525,6 +532,65 @@ $SSH "logs --date=2026-09-29" > audit.jsonl
 
 ---
 
+## ۶-الف. Jenkins (فاز ۱۱)
+
+### `deploy/install-ctl.sh` (روی Docker host، با root)
+
+| گزینه | پیش‌فرض | توضیح |
+|---|---|---|
+| `--pubkey FILE` | **الزامی** | کلید عمومی Jenkins |
+| `--container NAME` | `gitlab` | نام کانتینر GitLab |
+| `--dry-run` | — | فقط نمایش برنامه |
+
+این اسکریپت:
+- کاربر `gitpolicy-deploy` را می‌سازد: بدون رمز و **بدون** عضویت در گروه docker.
+- `git-policy-ctl` را در `/usr/local/sbin` نصب می‌کند.
+- فایل `/etc/sudoers.d/git-policy` را می‌سازد (بررسی‌شده با `visudo -c`).
+- `authorized_keys` را با `command="sudo -n …git-policy-ctl",restrict` تنظیم می‌کند.
+
+دوباره اجرا کردنش بی‌خطر است (idempotent).
+
+### job `git-policy`: پارامترها
+
+| پارامتر | مقدار | کاربرد |
+|---|---|---|
+| `ACTION` | `STATUS` · `VALIDATE_POLICY` · `UPDATE_POLICY` · `ENABLE` · `DISABLE` · `ROLLBACK_POLICY` · `BACKUP_POLICY` · `SYNC_GROUP_MEMBERSHIP` · `EXPLAIN` · `DEPLOY` · `RETIRE_HOOK` · `PRUNE_LOGS` · `EXPORT_LOGS` | کار مورد نظر |
+| `ENVIRONMENT` | `TEST` · `PRODUCTION` | محیط |
+| `REASON` | ۱۰ تا ۵۰۰ کاراکتر | **الزامی برای هر تغییر** |
+| `POLICY_REF` | شاخه/تگ/commit | پیش‌فرض `main` |
+| `DISABLE_TTL` | `30m`…`24h` | برای DISABLE |
+| `ROLLBACK_TO` | عدد | خالی = قبلی |
+| `FORCE` | true/false | برای sync؛ در PRODUCTION تأیید لازم دارد |
+| `EXPLAIN_USER` · `EXPLAIN_PROJECT` · `EXPLAIN_REF` · `EXPLAIN_GROUPS` | — | برای EXPLAIN |
+| `HOOK_NAME` | نام فایل | برای RETIRE_HOOK |
+| `LOG_DATE` | `YYYY-MM-DD` | برای EXPORT_LOGS |
+
+**تأیید در PRODUCTION:** اکشن‌های `UPDATE_POLICY`، `DISABLE`، `ROLLBACK_POLICY`، `DEPLOY`، `RETIRE_HOOK` و sync با `FORCE` منتظر تأیید یکی از `GP_APPROVERS` می‌مانند (حداکثر ۳۰ دقیقه). درخواست‌کننده نمی‌تواند خودش تأیید کند.
+
+### متغیرهای سراسری Jenkins
+
+| متغیر | نمونه (lab) |
+|---|---|
+| `GP_POLICY_REPO` | `http://gitlab/platform/git-policy-config.git` |
+| `GP_POLICY_REPO_CRED` | `git-policy-config-read` |
+| `GP_CTL_TEST` / `GP_CTL_PRODUCTION` | `gitpolicy-deploy@gp-ctl` |
+| `GP_SSH_CRED_TEST` / `GP_SSH_CRED_PRODUCTION` | `git-policy-ssh-test` / `git-policy-ssh-prod` |
+| `GP_GITLAB_URL_TEST` / `GP_GITLAB_URL_PRODUCTION` | `http://gitlab` |
+| `GP_GITLAB_TOKEN_TEST` / `GP_GITLAB_TOKEN_PRODUCTION` | `gitlab-api-readonly` |
+| `GP_APPROVERS` | `approver` (کاربر یا گروه Jenkins، جداشده با کاما) |
+| `GP_BIN` | `/opt/git-policy/git-policy-0.1.0-linux-amd64` |
+| `GP_SSH_KNOWN_HOSTS` (اختیاری) | فایل known_hosts برای pin کردن host key؛ **در production الزامی شود** |
+
+### job ‌های دیگر
+
+| job | کار |
+|---|---|
+| `git-policy-gitops` | هر ۲ دقیقه repo policy را بررسی می‌کند: `test/policy.yaml` را validate و روی TEST اعمال می‌کند، و برای PRODUCTION فقط drift را گزارش می‌دهد (UNSTABLE) |
+| `git-policy-sync-membership` | همگام‌سازی گروه‌ها هر ۱۵ دقیقه (پارامتر `FORCE`) |
+| `git-policy-status` | وضعیت سریع (lab) |
+
+---
+
 ## ۷. lab محلی (`lab/`)
 
 | دستور | کار |
@@ -532,6 +598,7 @@ $SSH "logs --date=2026-09-29" > audit.jsonl
 | `lab/up.sh` | بالا آوردن GitLab CE 17.10.5 + Jenkins + gp-ctl؛ رمزها و کلیدها را یک بار می‌سازد |
 | `lab/down.sh` | توقف (داده‌ها حفظ می‌شوند) |
 | `lab/down.sh --purge` | توقف و حذف همه‌ی داده‌ها |
+| `lab/seed-policy-repo.sh` | ساخت repo GitOps یعنی `platform/git-policy-config` با محتوای اولیه (`lab/policy-repo-seed/`)؛ `up.sh` خودش آن را اجرا می‌کند |
 
 | سرویس | آدرس | کاربر | رمز |
 |---|---|---|---|
@@ -559,6 +626,7 @@ $SSH "logs --date=2026-09-29" > audit.jsonl
 | `tools/build.sh all` | test + build |
 | `tests/integration/phase4.sh` … `phase8.sh` | تست با `git push` واقعی روی repo محلی (۳۷/۴۰/۲۳/۴۲/۲۲ مورد) |
 | `tests/examples/verify.sh ["" 01 02 …]` | همه‌ی ردیف‌های ۱۰ مثال `EXAMPLES-FA.md` (۶۶ push) |
+| `tests/gitlab/verify-jenkins.sh` | **فاز ۱۱:** همه‌ی اکشن‌های Jenkins، GitOps، تأیید چهار چشم، عدم نشت secret |
 | `tests/gitlab/verify-gitlab.sh` | **همه‌ی فازها روی GitLab واقعی lab** (۸۵ بررسی): HTTP، SSH، Web، fork+MR، wiki، deploy key، کانال و jobهای Jenkins، sync گروه‌ها، TEST 17/18 |
 | `tools/dev/check_schema.py` | بررسی JSON Schema با فایل‌های نمونه |
 | `tools/dev/rtl.py FILE…` | راست‌چین کردن اسناد فارسی (کد بلاک‌ها چپ‌چین) |

@@ -14,6 +14,24 @@ jenkins:
   authorizationStrategy:
     loggedInUsersCanDoAnything:
       allowAnonymousRead: false
+  # Global variables read by jenkins/Jenkinsfile and Jenkinsfile.gitops.
+  # The lab has one GitLab: TEST and PRODUCTION point to it with separate
+  # credential ids, exactly as two real environments would be configured.
+  globalNodeProperties:
+    - envVars:
+        env:
+          - {key: GP_POLICY_REPO, value: "http://gitlab/platform/git-policy-config.git"}
+          - {key: GP_POLICY_REPO_CRED, value: git-policy-config-read}
+          - {key: GP_CTL_TEST, value: "gitpolicy-deploy@gp-ctl"}
+          - {key: GP_CTL_PRODUCTION, value: "gitpolicy-deploy@gp-ctl"}
+          - {key: GP_SSH_CRED_TEST, value: git-policy-ssh-test}
+          - {key: GP_SSH_CRED_PRODUCTION, value: git-policy-ssh-prod}
+          - {key: GP_GITLAB_URL_TEST, value: "http://gitlab"}
+          - {key: GP_GITLAB_URL_PRODUCTION, value: "http://gitlab"}
+          - {key: GP_GITLAB_TOKEN_TEST, value: gitlab-api-readonly}
+          - {key: GP_GITLAB_TOKEN_PRODUCTION, value: gitlab-api-readonly}
+          - {key: GP_APPROVERS, value: "approver"}
+          - {key: GP_BIN, value: "/opt/git-policy/git-policy-0.1.0-linux-amd64"}
 credentials:
   system:
     domainCredentials:
@@ -26,23 +44,44 @@ credentials:
               privateKeySource:
                 directEntry:
                   privateKey: ${readFile:/run/secrets/git-policy-ssh-key}
+          - basicSSHUserPrivateKey:
+              scope: GLOBAL
+              id: git-policy-ssh-prod
+              username: gitpolicy-deploy
+              description: "SSH key for the git-policy-ctl forced-command channel (PRODUCTION; lab: same key)"
+              privateKeySource:
+                directEntry:
+                  privateKey: ${readFile:/run/secrets/git-policy-ssh-key}
           - string:
               scope: GLOBAL
               id: gitlab-api-readonly
-              description: "GitLab API token (read_api) for membership sync"
+              description: "GitLab API token (read_api) for membership sync and inventory"
               secret: ${readFile:/run/secrets/gitlab-api-token}
+          - usernamePassword:
+              scope: GLOBAL
+              id: git-policy-config-read
+              description: "Read access to the policy repository (lab: root token; production: a deploy token)"
+              username: root
+              password: ${readFile:/run/secrets/gitlab-api-token}
 unclassified:
   location:
     url: http://localhost:8081/
 jobs:
-  # Pipelines live in jenkins/pipelines/*.groovy (copied into the image);
-  # Job DSL only creates the jobs and loads each script from its file.
+  # Pipelines are files; Job DSL only creates the jobs and loads the scripts.
+  #   git-policy, git-policy-gitops  -> jenkins/Jenkinsfile*  (the product, mounted read-only)
+  #   git-policy-status, -sync-membership -> lab/jenkins/pipelines/*.groovy (lab helpers)
   - script: |
-      ['git-policy-status', 'git-policy-sync-membership'].each { name ->
+      def jobs = [
+        'git-policy'                : '/opt/git-policy-jenkins/Jenkinsfile',
+        'git-policy-gitops'         : '/opt/git-policy-jenkins/Jenkinsfile.gitops',
+        'git-policy-status'         : '/usr/share/jenkins/ref/pipelines/git-policy-status.groovy',
+        'git-policy-sync-membership': '/usr/share/jenkins/ref/pipelines/git-policy-sync-membership.groovy',
+      ]
+      jobs.each { name, file ->
         pipelineJob(name) {
           definition {
             cps {
-              script(new File("/usr/share/jenkins/ref/pipelines/" + name + ".groovy").text)   // string concatenation on purpose: JCasC interpolates dollar-brace itself
+              script(new File(file).text)
               sandbox(true)
             }
           }
