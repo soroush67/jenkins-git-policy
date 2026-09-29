@@ -1,7 +1,11 @@
+<div dir="rtl">
+
 # راهنمای فارسی git-policy
 
 > نسخه نرم‌افزار: **v0.1.0** — نسخه schema سیاست: **`git-policy/v1`**
-> وضعیت: فازهای ۱ تا ۸ انجام شده. **همه‌ی قوانین enforcement** فعال‌اند: هویت (کاربر، گروه، پروژه، ref)، پسوند و مسیر فایل، حجم فایل، و تشخیص فایل اجرایی ویندوز از روی محتوا. همه روی **همه‌ی commitهای جدید** هر push اجرا می‌شوند.
+> وضعیت: فازهای ۱ تا ۹ انجام شده و **همه روی GitLab واقعی (17.10.5) تست شده‌اند** (۷۲ از ۷۲). همه‌ی قوانین enforcement فعال‌اند و روی **همه‌ی commitهای جدید** هر push اجرا می‌شوند. audit log کامل است.
+>
+> 📘 **راهنمای کامل همه‌ی دستورات و گزینه‌ها:** [CLI-FA.md](CLI-FA.md)  — 📗 **۱۰ مثال:** [EXAMPLES-FA.md](EXAMPLES-FA.md)
 >
 > **رابط کاربری نهایی این سیستم Jenkins است.** دستورهای `docker exec ... admin` در این راهنما فقط برای تست lab در همین مراحل‌اند؛ در فاز ۱۱ همه‌ی ورودی‌ها و عملیات از طریق Jenkins انجام می‌شود.
 
@@ -11,6 +15,8 @@
 
 یک لایه‌ی **اجرای سیاست سازمانی روی سرور Git** برای GitLab Self-Managed است که از طریق **Global Pre-Receive Hook** در Gitaly اجرا می‌شود.
 هر `git push` قبل از ثبت، توسط این موتور بررسی می‌شود و یا **پذیرفته** یا **رد** می‌شود.
+
+<div dir="ltr">
 
 ```
 Developer ── git push ──> GitLab ──> Gitaly ──> pre-receive.d/50-git-policy (اسکریپت کوچک)
@@ -25,6 +31,8 @@ Developer ── git push ──> GitLab ──> Gitaly ──> pre-receive.d/50
 
 Jenkins (Control Plane) ──> فقط مدیریت: apply / enable / disable / rollback / status
 ```
+
+</div>
 
 **اصول کلیدی:**
 
@@ -50,14 +58,18 @@ Jenkins (Control Plane) ──> فقط مدیریت: apply / enable / disable / 
 | ۵ | قوانین هویت و scope (user/group/namespace/project/ref)، استثناها، explain | ✅ تأیید شده |
 | ۶ | پیمایش ضد-دور‌زدن (همه‌ی commitهای جدید)، محدودیت‌ها، timeout | ✅ تأیید شده |
 | ۷ | پسوند و مسیر فایل (DLL, EXE, ...)، حالت audit، بازنشسته کردن PoC | ✅ تأیید شده |
-| ۸ | حجم blob و امضای PE | ✅ **انجام شده (منتظر تأیید)** |
-| ۹ به بعد | Audit کامل، cache گروه‌ها، Jenkins، تست، امنیت، کارایی، مستندات | ⏳ |
+| ۸ | حجم blob و امضای PE | ✅ تأیید شده |
+| ۹ | audit کامل: `log_accepted`، `required`، retention، فیلدهای SIEM | ✅ **انجام شده (منتظر تأیید)** |
+| lab | GitLab 17.10.5 + Jenkins + gp-ctl با docker-compose؛ تست همه‌ی فازها روی GitLab واقعی | ✅ **۷۲ از ۷۲** |
+| ۱۰ به بعد | همگام‌سازی گروه‌ها، pipeline کامل Jenkins، تست، امنیت، کارایی، مستندات | ⏳ |
 
 > ✅ از فاز ۷ به بعد **git-policy خودش DLL/EXE و مسیرهای ممنوع را رد می‌کند.** PoC قدیمی (`01-block-dll`) تا زمانی که شما روی lab تأیید کنید دست‌نخورده می‌ماند و بعد با `admin retire-hook` بازنشسته می‌شود (بخش ۱۵.۵).
 
 ---
 
 ## ۳. ساختار پروژه
+
+<div dir="ltr">
 
 ```
 ~/infra/git-policy/
@@ -84,11 +96,15 @@ Jenkins (Control Plane) ──> فقط مدیریت: apply / enable / disable / 
 └── docs/                    مستندات طراحی + همین راهنما
 ```
 
+</div>
+
 ---
 
 ## ۴. ساخت (Build) و تست
 
 نیازی به نصب Go ندارید؛ همه‌چیز داخل کانتینر (`golang:1.24-alpine` به‌علاوه‌ی git) اجرا می‌شود.
+
+<div dir="ltr">
 
 ```bash
 cd ~/infra/git-policy
@@ -104,7 +120,12 @@ tests/integration/phase7.sh   # ۴۲ تست: رد DLL/EXE/مسیر با hook و�
 tests/integration/phase8.sh   # ۲۲ تست: حجم فایل، سقف mandatory و استثنا، امضای PE، کارایی
 ```
 
+</div>
+
 خروجی مورد انتظار:
+
+<div dir="ltr">
+
 ```
 RESULT: 37 passed, 0 failed     (phase4)
 RESULT: 40 passed, 0 failed     (phase5)
@@ -112,6 +133,8 @@ RESULT: 23 passed, 0 failed     (phase6)
 RESULT: 42 passed, 0 failed     (phase7)
 RESULT: 22 passed, 0 failed     (phase8)
 ```
+
+</div>
 
 اولین اجرای `tools/build.sh` یک image کوچک به نام `git-policy-build:go1.24` (Go + git) می‌سازد (فقط یک بار، نیاز به اینترنت).
 
@@ -122,6 +145,8 @@ RESULT: 22 passed, 0 failed     (phase8)
 ## ۵. نوشتن سیاست (Policy)
 
 ### ۵.۱ ساختار کلی
+
+<div dir="ltr">
 
 ```yaml
 apiVersion: git-policy/v1        # نسخه schema (ربطی به نسخه نرم‌افزار ندارد)
@@ -138,6 +163,8 @@ users:      { alex: {...} }
 groups:     { contractors: {...} }
 exceptions: [ ... ]              # استثناهای صریح، محدود و تاریخ‌دار
 ```
+
+</div>
 
 نمونه‌ی کامل: `examples/policy.example.yaml`
 **۱۰ مثال از ساده تا کامل (با توضیح فارسی و تست‌شده):** [`docs/fa/EXAMPLES-FA.md`](EXAMPLES-FA.md)
@@ -168,6 +195,8 @@ exceptions: [ ... ]              # استثناهای صریح، محدود و �
 
 ### ۵.۵ اعتبارسنجی قبل از استقرار
 
+<div dir="ltr">
+
 ```bash
 B=dist/git-policy-0.1.0-linux-amd64
 $B validate examples/policy.example.yaml          # خروجی متنی
@@ -175,12 +204,19 @@ $B validate --json examples/policy.example.yaml   # برای Jenkins
 $B compile examples/policy.example.yaml           # دیدن نسخه‌ی نرمال‌شده (compiled.json)
 ```
 
+</div>
+
 کد خروج: `0` معتبر، `1` نامعتبر، `2` خطای ورودی/فایل.
 نمونه‌ی خطا:
+
+<div dir="ltr">
+
 ```
 ERROR   V020  projects["finance/legacy-erp"].unblock_extensions: "dll" is blocked by mandatory and cannot be unblocked ...
 RESULT: INVALID (1 errors, 0 warnings)
 ```
+
+</div>
 
 ---
 
@@ -195,6 +231,8 @@ RESULT: INVALID (1 errors, 0 warnings)
 
 ### ۶.۲ انتقال فایل‌ها به Docker host
 
+<div dir="ltr">
+
 ```bash
 # روی همین workstation:
 cd ~/infra/git-policy
@@ -202,7 +240,11 @@ tools/build.sh all
 scp -r dist install.sh uninstall.sh examples <user>@192.168.120.128:~/git-policy/
 ```
 
+</div>
+
 ### ۶.۳ نصب (روی Docker host lab)
+
+<div dir="ltr">
 
 ```bash
 cd ~/git-policy
@@ -214,6 +256,8 @@ cd ~/git-policy
 ./install.sh --actor "soroush"
 ```
 
+</div>
+
 بررسی‌هایی که `install.sh` انجام می‌دهد:
 1. وجود باینری و تطابق sha256
 2. در حال اجرا بودن کانتینر `gitlab`
@@ -224,15 +268,23 @@ cd ~/git-policy
 7. کپی باینری، بررسی مجدد sha256 داخل کانتینر، اجرای `admin install`، و نمایش `status`
 
 خروجی مورد انتظار در انتها:
+
+<div dir="ltr">
+
 ```
 HEALTH: WARNING
   - WARNING: engine is disabled without expiry (initial install state)
   - WARNING: no loadable policy: no policy has been deployed
 installed. Next: deploy a policy (admin apply) and enable it (admin enable).
 ```
+
+</div>
+
 (WARNING در این مرحله طبیعی است.)
 
 ### ۶.۴ استقرار سیاست و روشن کردن
+
+<div dir="ltr">
 
 ```bash
 GP="docker exec -u root gitlab /var/opt/gitlab/git-policy/bin/git-policy"
@@ -243,14 +295,21 @@ $GP admin enable  --actor soroush --reason "lab test"
 $GP status
 ```
 
+</div>
+
 ---
 
 ## ۷. عملیات روزمره
 
 همه‌ی دستورات مدیریتی باید به صورت **root** داخل کانتینر اجرا شوند (`docker exec -u root`). در ادامه:
+
+<div dir="ltr">
+
 ```bash
 GP="docker exec -u root gitlab /var/opt/gitlab/git-policy/bin/git-policy"
 ```
+
+</div>
 
 | کار | دستور |
 |---|---|
@@ -280,6 +339,9 @@ GP="docker exec -u root gitlab /var/opt/gitlab/git-policy/bin/git-policy"
 | `3` | CRITICAL (مثلاً hook نصب نیست، break-glass فعال است، یا موتور روشن است ولی سیاستی ندارد) |
 
 نمونه خروجی:
+
+<div dir="ltr">
+
 ```
 git-policy v0.1.0  (root /var/opt/gitlab/git-policy)
   Engine:            enabled
@@ -298,9 +360,13 @@ git-policy v0.1.0  (root /var/opt/gitlab/git-policy)
 HEALTH: OK
 ```
 
+</div>
+
 ---
 
 ## ۸. ساختار روی سرور و مجوزها
+
+<div dir="ltr">
 
 ```
 /var/opt/gitlab/git-policy/          root:git  0750
@@ -325,6 +391,8 @@ HEALTH: OK
 /var/opt/gitlab/gitaly/custom_hooks/pre-receive.d/50-git-policy   root:root 0755
 ```
 
+</div>
+
 **نکته امنیتی:** کاربر `git` (که Gitaly و hook با آن اجرا می‌شوند) فقط **خواندن** سیاست/وضعیت و **افزودن** به لاگ را دارد. این موارد در تست بررسی شد و همه **رد** شدند:
 تغییر state، ساختن break-glass، تغییر ACTIVE، حذف باینری، تغییر hook، ساختن نسخه‌ی جعلی.
 
@@ -346,11 +414,17 @@ HEALTH: OK
 | disable منقضی شده | موتور خودکار **روشن** می‌شود | خاموشی فراموش‌شده ممکن نیست |
 
 پیامی که توسعه‌دهنده در این حالت‌ها می‌بیند:
+
+<div dir="ltr">
+
 ```
 remote: GL-HOOK-ERR: Push rejected by organizational Git policy.
 remote: GL-HOOK-ERR: Rule: POLICY_UNAVAILABLE
 remote: GL-HOOK-ERR: Required action: The Git policy service is unavailable. Contact the platform team.
 ```
+
+</div>
+
 جزئیات فنی (مسیر فایل، علت دقیق) **فقط در audit log** ثبت می‌شود، نه در پیام توسعه‌دهنده.
 
 ---
@@ -358,17 +432,30 @@ remote: GL-HOOK-ERR: Required action: The Git policy service is unavailable. Con
 ## ۱۰. شرایط اضطراری (Disaster Recovery)
 
 ### ۱۰.۱ سیاست جدید مشکل ایجاد کرده
+
+<div dir="ltr">
+
 ```bash
 $GP admin rollback --actor NAME --reason "rollback: rule X blocks valid pushes"
 ```
 
+</div>
+
 ### ۱۰.۲ نیاز به توقف موقت موتور (موتور سالم است)
+
+<div dir="ltr">
+
 ```bash
 $GP admin disable --actor NAME --reason "incident INC-123" --ttl 1h
 ```
 
+</div>
+
 ### ۱۰.۳ موتور کاملاً خراب است (باینری/state/سیاست) — Break-glass
 این راه فقط با دسترسی root روی سرور ممکن است و **هر push** در حالت break-glass ثبت می‌شود:
+
+<div dir="ltr">
+
 ```bash
 # فعال‌سازی: همه‌ی pushها از git-policy عبور می‌کنند (hookهای دیگر مثل 01-block-dll همچنان اجرا می‌شوند)
 docker exec -u root gitlab touch /var/opt/gitlab/git-policy/state/break-glass
@@ -382,25 +469,44 @@ docker exec -u root gitlab rm /var/opt/gitlab/git-policy/state/break-glass
 docker exec gitlab cat /var/opt/gitlab/git-policy/logs/break-glass.log
 ```
 
+</div>
+
 ### ۱۰.۴ فایل state خراب شده
+
+<div dir="ltr">
+
 ```bash
 $GP admin enable  --actor NAME --reason "repair state"      # یا:
 $GP admin disable --actor NAME --reason "repair state" --ttl 1h
 ```
+
+</div>
+
 (هر دو فایل state را از نو و به صورت اتمیک می‌نویسند.)
 
 ### ۱۰.۵ نسخه‌های سیاست همه خراب شده‌اند
 یک `admin apply` تازه همیشه ممکن است (حتی وقتی هیچ نسخه‌ای قابل خواندن نیست). `revision` را از آخرین مقدار بالاتر بگذارید.
 
 ### ۱۰.۶ hook تغییر کرده یا خراب شده
+
+<div dir="ltr">
+
 ```bash
 ./install.sh --replace-hook     # نسخه‌ی فعلی در backup/ ذخیره می‌شود
 ```
 
+</div>
+
 ### ۱۰.۷ حذف hook (بازگشت به وضعیت قبل)
+
+<div dir="ltr">
+
 ```bash
 ./uninstall.sh
 ```
+
+</div>
+
 فقط `50-git-policy` حذف می‌شود (با backup)؛ سیاست‌ها، state، لاگ‌ها و باینری باقی می‌مانند و `install.sh` دوباره همه‌چیز را برمی‌گرداند.
 
 ---
@@ -421,6 +527,8 @@ $GP admin disable --actor NAME --reason "repair state" --ttl 1h
 ---
 
 ## ۱۲. تست روی Lab (پیشنهادی برای تأیید فاز ۴)
+
+<div dir="ltr">
 
 ```bash
 GP="docker exec -u root gitlab /var/opt/gitlab/git-policy/bin/git-policy"
@@ -453,6 +561,8 @@ $GP status                                    # enabled (disable expired)
 $GP admin disable --actor soroush --reason "waiting for phase 5" --ttl 168h
 ```
 
+</div>
+
 ---
 
 ## ۱۳. فاز ۵: قوانین هویت (کاربر، گروه، پروژه)
@@ -460,6 +570,8 @@ $GP admin disable --actor soroush --reason "waiting for phase 5" --ttl 168h
 ### ۱۳.۱ چه چیزی اجرا می‌شود؟
 
 برای **هر ref** در push (شاخه، تگ، حذف شاخه)، به این ترتیب:
+
+<div dir="ltr">
 
 ```
 ۱. نوع repository (از GL_REPOSITORY):  project → همه‌ی قوانین
@@ -472,10 +584,14 @@ $GP admin disable --actor soroush --reason "waiting for phase 5" --ttl 168h
 ۶. هر رد شدن اول با exceptions بررسی می‌شود؛ اگر استثنای معتبری بخورد → ✅ + ثبت EXCEPTION_APPLIED
 ```
 
+</div>
+
 - یک push چند-ref **همه یا هیچ** است: اگر حتی یک ref رد شود، هیچ refی ثبت نمی‌شود (رفتار خود Git).
 - **حذف شاخه هم push است**؛ کاربری که `push: deny` دارد نمی‌تواند شاخه حذف کند.
 
 ### ۱۳.۲ مثال قوانین
+
+<div dir="ltr">
 
 ```yaml
 mandatory:
@@ -504,6 +620,8 @@ exceptions:
     expires: 2026-10-31
 ```
 
+</div>
+
 ### ۱۳.۳ قواعد تصمیم (خلاصه)
 
 | قاعده | مثال |
@@ -530,6 +648,8 @@ exceptions:
 
 ### ۱۳.۵ پیامی که توسعه‌دهنده می‌بیند
 
+<div dir="ltr">
+
 ```
 remote: GL-HOOK-ERR: Push rejected by organizational Git policy.
 remote: GL-HOOK-ERR: User: alex
@@ -543,7 +663,11 @@ remote: GL-HOOK-ERR: Required action (USER_PUSH_DENIED): You are not permitted t
 remote: GL-HOOK-ERR: Help: #devops-help
 ```
 
+</div>
+
 جزئیات داخلی (کدام خط policy باعث رد شد) در پیام **نیست** و فقط در audit log ثبت می‌شود:
+
+<div dir="ltr">
 
 ```json
 {"action":"REJECT","user":"alex","project":"finance/payment-api","ref":"refs/heads/main",
@@ -551,14 +675,23 @@ remote: GL-HOOK-ERR: Help: #devops-help
  "commit":"9447e19...","policy_version":"000001","membership":"fresh","timestamp":"2026-09-29T14:25:55+03:30"}
 ```
 
+</div>
+
 ### ۱۳.۶ دستور explain: «چرا رد شد؟»
 
 بدون push واقعی نشان می‌دهد policy درباره‌ی یک push فرضی چه تصمیمی می‌گیرد. در فاز ۱۱ همین به شکل اکشن `EXPLAIN` در Jenkins درمی‌آید.
+
+<div dir="ltr">
 
 ```bash
 git-policy explain --policy examples/policy.example.yaml \
     --user carol --groups contractors --project outsourcing/portal
 ```
+
+</div>
+
+<div dir="ltr">
+
 ```
 Identity
   => namespace(depth 1)       group allow groups["contractors"].namespaces["outsourcing"].push
@@ -569,6 +702,8 @@ Effective content rules (enforced from Phases 7-8)
   max file size:      20MiB (defaults.max_file_size)
 ```
 
+</div>
+
 - `=>` قانونی است که تصمیم را گرفته.
 - بدون `--policy`، سیاست فعال سرور و cache عضویت خوانده می‌شوند.
 - بخش «Effective content rules» نشان می‌دهد در فازهای ۷ و ۸ برای این پروژه و شاخه چه چیزی ممنوع خواهد بود.
@@ -576,6 +711,8 @@ Effective content rules (enforced from Phases 7-8)
 ### ۱۳.۷ تست روی lab (فاز ۵)
 
 قوانین کاربری را می‌شود روی lab با کاربران واقعی تست کرد. قوانین گروهی تا فاز ۱۰ به cache نیاز دارند.
+
+<div dir="ltr">
 
 ```bash
 GP="docker exec -u root gitlab /var/opt/gitlab/git-policy/bin/git-policy"
@@ -595,14 +732,20 @@ $GP admin enable --actor soroush --reason "phase5 lab"
 $GP explain --user USERNAME_TEST --project GROUP/PROJECT_TEST     # انتظار: Verdict: REJECT
 ```
 
+</div>
+
 سپس:
 - push با همان کاربر به همان پروژه → رد با `USER_PUSH_DENIED`
 - push با همان کاربر به پروژه‌ی دیگر → قبول
 - ویرایش یک فایل از Web UI گیت‌لب با همان کاربر → همان پیام در UI
 
+<div dir="ltr">
+
 ```bash
 docker exec gitlab sh -c 'grep REJECT /var/opt/gitlab/git-policy/logs/audit-*.jsonl | tail -n 2'
 ```
+
+</div>
 
 ---
 
@@ -622,6 +765,8 @@ docker exec gitlab sh -c 'grep REJECT /var/opt/gitlab/git-policy/logs/audit-*.js
 
 ### ۱۴.۲ راه‌حل
 
+<div dir="ltr">
+
 ```
 برای هر ref در push:
   ۱. نوع شیء جدید:  commit | tag → commit | tag → tree | tag → blob       (git cat-file --batch-check)
@@ -635,6 +780,8 @@ docker exec gitlab sh -c 'grep REJECT /var/opt/gitlab/git-policy/logs/audit-*.js
        - submodule (gitlink) محتوا نیست و نادیده گرفته می‌شود
   ۵. tag → tree: همه‌ی مسیرهای tree؛  tag → blob: خود blob
 ```
+
+</div>
 
 - **حذف شاخه یا تگ** چیزی اضافه نمی‌کند. فقط قوانین هویتی (فاز ۵) روی آن اعمال می‌شوند.
 - **force push**: فقط commitهای بازنویسی‌شده‌ی جدید بررسی می‌شوند.
@@ -656,6 +803,8 @@ docker exec gitlab sh -c 'grep REJECT /var/opt/gitlab/git-policy/logs/audit-*.js
 
 همه‌ی این موارد **fail-closed** هستند: pushی که بررسی نشده، دور زدن سیاست است.
 
+<div dir="ltr">
+
 ```yaml
 exceptions:
   - id: EXC-IMPORT
@@ -664,6 +813,8 @@ exceptions:
     reason: import legacy history
     expires: 2026-10-31
 ```
+
+</div>
 
 ### ۱۴.۵ کارایی
 
@@ -680,14 +831,23 @@ exceptions:
 
 نشان می‌دهد یک push دقیقاً چه چیزهایی را وارد repository می‌کند:
 
+<div dir="ltr">
+
 ```bash
 cd /path/to/repo.git
 echo "<old-sha> <new-sha> refs/heads/main" | git-policy scan --policy policy.yaml --project finance/app
 ```
+
+</div>
+
+<div dir="ltr">
+
 ```
 commits=2 blobs=1 entries=1 exclusion-tips=1 duration=4ms
   refs/heads/main                55e85808ff46 100644 "Lib/Mic.Caching.dll"
 ```
+
+</div>
 
 > در فاز ۶ این مسیرها **فقط پیدا می‌شوند**. فاز ۷ آن‌ها را با `blocked_extensions` و `blocked_paths` مقایسه می‌کند، و فاز ۸ حجم و امضای PE را بررسی می‌کند.
 
@@ -724,6 +884,8 @@ commits=2 blobs=1 entries=1 exclusion-tips=1 duration=4ms
 
 ### ۱۵.۳ پیام توسعه‌دهنده
 
+<div dir="ltr">
+
 ```
 remote: GL-HOOK-ERR: Push rejected by organizational Git policy.
 remote: GL-HOOK-ERR: User: dev
@@ -739,6 +901,8 @@ remote: GL-HOOK-ERR: Required action (BLOCKED_EXTENSION): Publish binary depende
 remote: GL-HOOK-ERR: Help: #devops-help
 ```
 
+</div>
+
 - متن «Required action» از `settings.messages.remediation` در policy می‌آید. آدرس Nexus و روش کار با NuGet را همان‌جا بنویسید.
 - Nexus فقط در متن پیام است. در دسترس نبودن Nexus **هیچ اثری** روی بررسی push ندارد.
 - حداکثر ۲۰ مورد در پیام نشان داده می‌شود و حداکثر ۱۰۰۰ مورد در هر push ثبت می‌شود. بقیه با یک یادداشت «more findings» خلاصه می‌شوند.
@@ -747,43 +911,67 @@ remote: GL-HOOK-ERR: Help: #devops-help
 
 اگر DLL در یک commit قدیمی‌تر همین push اضافه شده باشد، حذف آن در commit بعدی **کافی نیست**، چون در تاریخچه می‌ماند. باید تاریخچه‌ی محلی بازنویسی شود:
 
+<div dir="ltr">
+
 ```bash
 git rebase -i origin/main          # commit مربوطه را edit کنید و فایل را حذف کنید
 # یا:
 git reset --soft origin/main && git rm --cached Lib/*.dll && git commit -m "..."
 ```
 
+</div>
+
 ### ۱۵.۵ برنامه‌ی جایگزینی PoC روی lab (پیشنهادی)
+
+<div dir="ltr">
 
 ```bash
 GP="docker exec -u root gitlab /var/opt/gitlab/git-policy/bin/git-policy"
 ./install.sh --actor soroush                       # ارتقا به نسخه‌ی فاز ۷
 ```
 
+</div>
+
 **گام ۱: حالت audit.** git-policy فقط ثبت می‌کند و PoC همچنان رد می‌کند.
 
 policy با `mandatory: {mode: audit, blocked_extensions: [dll, exe]}` و `settings: {mode: audit}` و یک revision جدید:
+
+<div dir="ltr">
+
 ```bash
 $GP admin apply  --actor soroush --reason "phase7 shadow" /tmp/p7.yaml
 # چند push معمولی و یک push با DLL؛ سپس:
 docker exec gitlab sh -c 'grep WOULD_REJECT /var/opt/gitlab/git-policy/logs/audit-*.jsonl | tail'
 ```
 
+</div>
+
 **گام ۲: حالت enforce.** اکنون هم PoC و هم git-policy رد می‌کنند.
 
 همان policy با `mode: enforce` و revision بالاتر. push با DLL باید پیام `Rule: BLOCKED_EXTENSION` را نشان دهد. این را از CLI و از Web UI امتحان کنید.
 
 **گام ۳: بازنشسته کردن PoC** (غیرمخرب؛ یک نسخه در `backup/` می‌ماند و در audit log ثبت می‌شود):
+
+<div dir="ltr">
+
 ```bash
 $GP admin retire-hook --actor soroush --name 01-block-dll
 docker exec gitlab ls -l /var/opt/gitlab/gitaly/custom_hooks/pre-receive.d/    # فقط 50-git-policy
 ```
+
+</div>
+
 بعد از آن push با DLL باید **فقط** با پیام git-policy رد شود.
 
 برای برگرداندن PoC (در صورت نیاز):
+
+<div dir="ltr">
+
 ```bash
 docker exec -u root gitlab sh -c 'cp /var/opt/gitlab/git-policy/backup/01-block-dll.retired.* /var/opt/gitlab/gitaly/custom_hooks/pre-receive.d/01-block-dll && chmod 0755 /var/opt/gitlab/gitaly/custom_hooks/pre-receive.d/01-block-dll'
 ```
+
+</div>
 
 ### ۱۵.۶ رویدادهای جدید audit
 
@@ -811,6 +999,8 @@ docker exec -u root gitlab sh -c 'cp /var/opt/gitlab/git-policy/backup/01-block-
 | بیشتر از حد مؤثر، ولی ≤ سقف mandatory | ❌ رد؛ یک استثنای **معمولی** با `max_file_size` کافی است |
 | بیشتر از سقف mandatory | ❌ رد؛ فقط استثنای **`mandatory: true`** با `max_file_size` کافی |
 
+<div dir="ltr">
+
 ```yaml
 mandatory:
   max_file_size: 50MiB             # سقف سازمانی
@@ -829,13 +1019,20 @@ exceptions:
     expires: 2026-12-15
 ```
 
+</div>
+
 پیام توسعه‌دهنده:
+
+<div dir="ltr">
+
 ```
 remote: GL-HOOK-ERR: Rule: FILE_TOO_LARGE
 remote: GL-HOOK-ERR: File: data/large.bin
 remote: GL-HOOK-ERR: Size: 3.0 MiB (limit 2.0 MiB)
 remote: GL-HOOK-ERR: Required action (FILE_TOO_LARGE): Store large artifacts in Nexus ...
 ```
+
+</div>
 
 **دور زدن‌ها هم پوشش داده شده‌اند:**
 - فایل بزرگی که در یک commit اضافه و در commit بعدی همان push حذف شود رد می‌شود.
@@ -847,6 +1044,8 @@ remote: GL-HOOK-ERR: Required action (FILE_TOO_LARGE): Store large artifacts in 
 
 نام فایل را می‌شود عوض کرد (`Mic.Caching.dll` → `readme.txt`)، ولی **محتوا** را نه. با `blocked_signatures: [pe]`، هر فایلی که header آن یک فایل اجرایی یا کتابخانه‌ی ویندوز باشد (exe، dll، sys، …) رد می‌شود، **هر نامی که داشته باشد**.
 
+<div dir="ltr">
+
 ```yaml
 namespaces:
   finance:
@@ -854,6 +1053,8 @@ namespaces:
       "refs/heads/release/**":
         blocked_signatures: [pe]
 ```
+
+</div>
 
 - تشخیص: `MZ` در ابتدای فایل **و** `PE\0\0` در آدرسی که در offset `0x3C` نوشته شده. فقط `MZ` کافی نیست، پس یک فایل متنی که با «MZ» شروع شود رد نمی‌شود (تست شده).
 - فقط **ابتدای** فایل (حداکثر ۶۴ KiB) استفاده می‌شود. ولی Git برای خواندن، هر شیء را کامل از حالت فشرده باز می‌کند، پس هزینه با حجم فایل‌های بررسی‌شده رشد می‌کند. به همین دلیل این قانون **فقط** برای کلاس‌هایی اجرا می‌شود که آن را فعال کرده‌اند (مثلاً شاخه‌های release) و در حالت پیش‌فرض خاموش است.
@@ -879,7 +1080,115 @@ namespaces:
 
 ---
 
-## ۱۷. واژه‌نامه
+## ۱۷. فاز ۹: audit log کامل
+
+### ۱۷.۱ تنظیمات
+
+<div dir="ltr">
+
+```yaml
+settings:
+  audit:
+    log_accepted: true      # برای هر push قبول‌شده هم یک رویداد ACCEPT ثبت شود (پیش‌فرض: false)
+    required: false         # true: اگر ثبت در audit log ممکن نباشد، push رد شود (AUDIT_UNAVAILABLE)
+    retention_days: 180     # فایل‌های قدیمی‌تر با admin prune-logs حذف می‌شوند
+```
+
+</div>
+
+| تنظیم | پیش‌فرض | اثر |
+|---|---|---|
+| `log_accepted` | `false` | رویداد `ACCEPT` شامل کاربر، پروژه، refها (old/new)، تعداد commitها و مدت بررسی |
+| `required` | `false` | `true` یعنی «pushی که ثبت نشود، قبول نشود». برای محیط‌هایی با الزام ممیزی سخت‌گیرانه |
+| `retention_days` | `180` | `admin prune-logs` (یا فعل `prune-logs` در Jenkins) فایل‌های قدیمی‌تر را حذف می‌کند؛ فایل امروز هرگز حذف نمی‌شود |
+
+### ۱۷.۲ ساختار هر رویداد
+
+هر خط یک JSON کامل است (JSON Lines) و این فیلدهای ثابت را دارد:
+
+| فیلد | توضیح |
+|---|---|
+| `timestamp` | زمان با منطقه‌ی زمانی سرور |
+| `action` | `REJECT`، `ACCEPT`، `WOULD_REJECT`، `EXCEPTION_APPLIED`، `POLICY_UPDATED`، `POLICY_ENABLED`، … |
+| `schema` | `git-policy/audit/v1` |
+| `event_id` | شناسه‌ی یکتا؛ برای حذف تکراری‌ها هنگام ارسال به SIEM |
+| `host` | نام host (برای چند سرور) |
+| `engine_version` | نسخه‌ی git-policy |
+| `user`، `gl_id`، `project`، `repository`، `protocol` | زمینه‌ی push از Gitaly |
+| `rule`، `source`، `ref`، `commit`، `file`، `size` | برای تخلف‌ها |
+| `actor`، `reason` | برای عملیات مدیریتی |
+
+### ۱۷.۳ ارسال به SIEM
+
+فایل‌ها در مسیر volume داده‌ی GitLab روی host هستند (`…/git-policy/logs/audit-*.jsonl`). هر ابزار جمع‌آوری لاگ (Filebeat، Vector، Fluent Bit) می‌تواند آن‌ها را به‌صورت JSON بخواند. نمونه برای Vector:
+
+<div dir="ltr">
+
+```toml
+[sources.git_policy]
+type    = "file"
+include = ["/srv/gitlab/data/git-policy/logs/audit-*.jsonl"]   # host path of /var/opt/gitlab
+[transforms.parse]
+type   = "remap"
+inputs = ["git_policy"]
+source = ". = parse_json!(.message)"
+```
+
+</div>
+
+---
+
+## ۱۸. lab محلی و تست روی GitLab واقعی
+
+### ۱۸.۱ بالا آوردن
+
+<div dir="ltr">
+
+```bash
+cd ~/infra/git-policy
+tools/build.sh all
+lab/up.sh                           # GitLab CE 17.10.5 + Jenkins + gp-ctl
+tests/gitlab/verify-gitlab.sh       # all phases on the real GitLab -> RESULT: 72 passed, 0 failed
+lab/down.sh                         # stop (data kept);  lab/down.sh --purge  deletes everything
+```
+
+</div>
+
+| سرویس | آدرس | ورود |
+|---|---|---|
+| GitLab | http://localhost:8080 (ssh 2222) | `root` / رمز در `lab/.env` |
+| Jenkins | http://localhost:8081 | `admin` / رمز در `lab/.env` — job آزمایشی `git-policy-status` |
+
+### ۱۸.۲ چه چیزهایی روی GitLab واقعی تأیید شد
+
+| موضوع | نتیجه |
+|---|---|
+| نصب با `install.sh` (غیرمخرب، شروع خاموش)، ارتقا، `deploy` از Jenkins | ✅ |
+| متغیرهای واقعی Gitaly: `GL_USERNAME`، `GL_PROJECT_PATH`، `GL_REPOSITORY`، `GL_PROTOCOL` | ✅ |
+| قوانین کاربر روی **HTTP**، **SSH** و **Web UI/API** | ✅ پیام ما در Web UI هم نمایش داده می‌شود |
+| قوانین گروه با cache عضویت | ✅ |
+| DLL اضافه و حذف در یک push، ترفند NTFS، مسیر ممنوع، استثنای محدود | ✅ |
+| **Merge Request از fork** با فایل ممنوع | ✅ GitLab: «Branch cannot be merged»؛ جزئیات در audit log |
+| حجم فایل، امضای PE روی release | ✅ |
+| wiki (فقط قوانین mandatory) | ✅ `GL_PROJECT_PATH=…/app.wiki`، `GL_REPOSITORY=wiki-N` |
+| fail-closed (state خراب)، break-glass، rollback، disable با TTL | ✅ |
+| `ACCEPT`، `audit.required`، `prune-logs`، `logs`، `backup` | ✅ |
+| بازنشسته کردن PoC | ✅ |
+| کانال Jenkins → gp-ctl → git-policy-ctl و رد دستورهای خطرناک | ✅ |
+
+### ۱۸.۳ یافته‌های مهم از GitLab واقعی
+
+1. **deploy key:** `GL_USERNAME` نام کاربری **سازنده‌ی کلید** است (در تست `root`) و `GL_ID=key-N`. یعنی قوانین کاربری آن شخص روی deploy keyهای او هم اعمال می‌شود. هنگام نوشتن policy این را در نظر بگیرید.
+2. **merge کردن MR:** GitLab پیام hook را در صفحه‌ی MR نشان نمی‌دهد و فقط می‌گوید «Branch cannot be merged». دلیل دقیق در audit log هست و با `explain` هم قابل بررسی است.
+3. **Web UI:** خطوط پیام با `<br>` نمایش داده می‌شوند و کاربر کل پیام (قانون، فایل، اقدام لازم) را می‌بیند.
+4. **دو باگ در `git-policy-ctl`** فقط در lab پیدا و رفع شدند:
+   - sudo به‌طور پیش‌فرض `SSH_ORIGINAL_COMMAND` را پاک می‌کند؛ `env_keep` مخصوص همین دستور لازم است.
+   - regex در bash تکرار بیشتر از ۲۵۵ را قبول نمی‌کند.
+5. **تأخیر:** یک push کامل HTTP روی lab با git-policy فعال حدود ۴۰۰ میلی‌ثانیه طول کشید، که بیشترش خود GitLab است.
+
+---
+
+## ۱۹. واژه‌نامه
 
 | واژه | معنی |
 |---|---|
@@ -899,3 +1208,5 @@ namespaces:
 | **Audit mode (shadow)** | حالتی که تخلف فقط با `WOULD_REJECT` ثبت می‌شود و push رد نمی‌شود؛ برای rollout امن |
 | **امضای PE** | ساختار header فایل‌های اجرایی ویندوز (MZ … PE\0\0)؛ مستقل از نام فایل |
 | **کلاس سیاست** | مجموعه‌ی refهایی که قوانین محتوایی یکسان دارند؛ برای تعیین «قبلاً بررسی‌شده» استفاده می‌شود |
+
+</div>

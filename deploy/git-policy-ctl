@@ -1,0 +1,191 @@
+#!/usr/bin/env bash
+# git-policy-ctl — the only thing Jenkins may run on the GitLab Docker host.
+#
+# Installed root:root 0755 as /usr/local/sbin/git-policy-ctl and reached
+# exclusively through an SSH forced command:
+#   authorized_keys (user gitpolicy-deploy):
+#     command="sudo -n /usr/local/sbin/git-policy-ctl",restrict ssh-ed25519 AAAA... jenkins
+#   sudoers (/etc/sudoers.d/git-policy, 0440):
+#     Defaults!/usr/local/sbin/git-policy-ctl env_keep += "SSH_ORIGINAL_COMMAND SSH_CLIENT"
+#     gitpolicy-deploy ALL=(root) NOPASSWD: /usr/local/sbin/git-policy-ctl
+#   (sudo's env_reset would otherwise drop SSH_ORIGINAL_COMMAND: every call
+#   would only print usage.)
+#
+# The requested command arrives in $SSH_ORIGINAL_COMMAND and is NEVER passed
+# to a shell: it is split into words, the verb must be on the allow-list and
+# every option must match a strict pattern. Free text (actor, reason) is
+# base64-encoded by the caller, so no quoting can break out. Payloads
+# (policy, membership, binary) arrive on stdin with a size cap.
+set -euo pipefail
+umask 077
+
+CONTAINER=${GITLAB_CONTAINER:-gitlab}
+GP_ROOT=/var/opt/gitlab/git-policy
+GP="$GP_ROOT/bin/git-policy"
+LOG=${GIT_POLICY_CTL_LOG:-/var/log/git-policy-ctl.log}
+MAX_POLICY=$((4 * 1024 * 1024))
+MAX_MEMBERSHIP=$((64 * 1024 * 1024))
+MAX_BINARY=$((128 * 1024 * 1024))
+
+die() { printf 'git-policy-ctl: %s\n' "$*" >&2; log "DENIED $*"; exit 2; }
+log() { printf '%s client=%s %s\n' "$(date -u +%FT%TZ)" "${SSH_CLIENT%% *}" "$*" >> "$LOG" 2>/dev/null || true; }
+
+usage() {
+    cat >&2 <<'EOF'
+verbs:
+  status [--json]
+  versions
+  validate                                   (policy on stdin)
+  explain --user=U --project=P [--ref=R] [--groups=a,b]
+  apply    --actor-b64=B --reason-b64=B      (policy on stdin)
+  rollback --actor-b64=B --reason-b64=B [--to=N]
+  enable   --actor-b64=B --reason-b64=B
+  disable  --actor-b64=B --reason-b64=B --ttl=D
+  apply-membership --actor-b64=B             (membership JSON on stdin)
+  retire-hook --actor-b64=B --name=FILE
+  deploy   --actor-b64=B --sha256=HEX        (linux/amd64 binary on stdin)
+  prune-logs --actor-b64=B [--days=N]
+  backup                                     (tar.gz on stdout)
+  logs     --date=YYYY-MM-DD                 (audit JSONL on stdout)
+EOF
+    exit 2
+}
+
+# ---- parse -------------------------------------------------------------------
+if [ -n "${SSH_CONNECTION:-}${SSH_CLIENT:-}" ] && [ -z "${SSH_ORIGINAL_COMMAND:-}" ]; then
+    die "no command received (interactive login, or sudoers lacks env_keep SSH_ORIGINAL_COMMAND)"
+fi
+read -r -a WORDS <<< "${SSH_ORIGINAL_COMMAND:-${*:-}}"
+[ "${#WORDS[@]}" -gt 0 ] || usage
+VERB=${WORDS[0]}
+declare -A OPT=()
+for w in "${WORDS[@]:1}"; do
+    [[ "$w" =~ ^--([a-z0-9-]+)(=(.*))?$ ]] || die "malformed argument"
+    key=${BASH_REMATCH[1]}
+    OPT[$key]=${BASH_REMATCH[3]:-true}
+done
+
+# POSIX regexes cannot express repeat counts above 255 (RE_DUP_MAX), so
+# patterns use + and lengths are checked separately.
+MAX_ARG=2048
+# need <key> <regex> : option must be present and match
+need() {
+    [ -n "${OPT[$1]+x}" ] || die "--$1 is required for $VERB"
+    [ "${#OPT[$1]}" -le "$MAX_ARG" ] && [[ "${OPT[$1]}" =~ $2 ]] || die "invalid --$1"
+}
+# may <key> <regex> : option optional but must match if present
+may() { [ -z "${OPT[$1]+x}" ] || { [ "${#OPT[$1]}" -le "$MAX_ARG" ] && [[ "${OPT[$1]}" =~ $2 ]]; } || die "invalid --$1"; }
+# only <keys...> : reject unexpected options
+only() {
+    local k a ok
+    for k in "${!OPT[@]}"; do
+        ok=0; for a in "$@"; do [ "$k" = "$a" ] && ok=1; done
+        [ "$ok" = 1 ] || die "unexpected option --$k for $VERB"
+    done
+}
+# text <key> : decode base64 free text and validate it
+text() {
+    need "$1-b64" '^[A-Za-z0-9+/=]+$'
+    local v
+    v=$(printf '%s' "${OPT[$1-b64]}" | base64 -d 2>/dev/null) || die "--$1-b64 is not base64"
+    [ -n "$v" ] && [ "${#v}" -le 500 ] || die "--$1 must be 1..500 characters"
+    [[ "$v" =~ [[:cntrl:]] ]] && die "--$1 contains control characters"
+    printf '%s' "$v"
+}
+
+RE_USER='^[A-Za-z0-9_][A-Za-z0-9_.-]*$'
+RE_PATH='^[A-Za-z0-9_][A-Za-z0-9_./-]*$'
+RE_REF='^refs/[A-Za-z0-9._/@+-]+$'
+RE_GROUPS='^[A-Za-z0-9_][A-Za-z0-9_./,-]*$'
+
+# gp <args...> : run git-policy inside the GitLab container as root
+gp() { docker exec -u root "$CONTAINER" "$GP" "$@"; }
+# gp_stdin <max-bytes> <args...> : forward a size-capped stdin payload
+gp_stdin() {
+    local max=$1; shift
+    local f; f=$(mktemp)
+    head -c "$((max + 1))" > "$f"
+    if [ "$(stat -c %s "$f")" -gt "$max" ]; then rm -f "$f"; die "payload larger than $max bytes"; fi
+    local rc=0
+    docker exec -i -u root "$CONTAINER" "$GP" "$@" < "$f" || rc=$?
+    rm -f "$f"
+    return "$rc"
+}
+
+[[ "$CONTAINER" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]] || die "invalid GITLAB_CONTAINER"
+log "verb=$VERB"
+
+# ---- dispatch ----------------------------------------------------------------
+case "$VERB" in
+    status)
+        only json; may json '^true$'
+        if [ "${OPT[json]:-}" = true ]; then gp status --json; else gp status; fi ;;
+    versions)
+        only; gp admin versions ;;
+    validate)
+        only; gp_stdin "$MAX_POLICY" validate --json - ;;
+    explain)
+        only user project ref groups
+        may user "$RE_USER"; need project "$RE_PATH"; may ref "$RE_REF"; may groups "$RE_GROUPS"
+        args=(explain --json --project "${OPT[project]}")
+        [ -n "${OPT[user]+x}" ] && args+=(--user "${OPT[user]}")
+        [ -n "${OPT[ref]+x}" ] && args+=(--ref "${OPT[ref]}")
+        [ -n "${OPT[groups]+x}" ] && args+=(--groups "${OPT[groups]}")
+        gp "${args[@]}" ;;
+    apply)
+        only actor-b64 reason-b64
+        actor=$(text actor); reason=$(text reason)
+        gp_stdin "$MAX_POLICY" admin apply --actor "$actor" --reason "$reason" - ;;
+    rollback)
+        only actor-b64 reason-b64 to; may to '^[0-9]{1,6}$'
+        actor=$(text actor); reason=$(text reason)
+        args=(admin rollback --actor "$actor" --reason "$reason")
+        [ -n "${OPT[to]+x}" ] && args+=(--to "${OPT[to]}")
+        gp "${args[@]}" ;;
+    enable)
+        only actor-b64 reason-b64
+        actor=$(text actor); reason=$(text reason)
+        gp admin enable --actor "$actor" --reason "$reason" ;;
+    disable)
+        only actor-b64 reason-b64 ttl; need ttl '^[1-9][0-9]{0,4}(s|m|h)$'
+        actor=$(text actor); reason=$(text reason)
+        gp admin disable --actor "$actor" --reason "$reason" --ttl "${OPT[ttl]}" ;;
+    apply-membership)
+        only actor-b64
+        actor=$(text actor)
+        gp_stdin "$MAX_MEMBERSHIP" admin apply-membership --actor "$actor" - ;;
+    retire-hook)
+        only actor-b64 name; need name '^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$'
+        actor=$(text actor)
+        gp admin retire-hook --actor "$actor" --name "${OPT[name]}" ;;
+    deploy)
+        only actor-b64 sha256; need sha256 '^[0-9a-f]{64}$'
+        actor=$(text actor)
+        tmp=$(mktemp -d)
+        trap 'rm -rf "$tmp"' EXIT
+        head -c "$((MAX_BINARY + 1))" > "$tmp/git-policy"
+        [ "$(stat -c %s "$tmp/git-policy")" -le "$MAX_BINARY" ] || die "binary too large"
+        [ "$(sha256sum "$tmp/git-policy" | cut -d' ' -f1)" = "${OPT[sha256]}" ] || die "sha256 mismatch"
+        ctmp=$(docker exec -u root "$CONTAINER" mktemp -d /tmp/git-policy-deploy.XXXXXX)
+        docker cp "$tmp/git-policy" "$CONTAINER:$ctmp/git-policy"
+        docker exec -u root "$CONTAINER" sh -c 'chown root:root "$1" && chmod 0700 "$1"' _ "$ctmp/git-policy"
+        [ "$(docker exec -u root "$CONTAINER" sha256sum "$ctmp/git-policy" | cut -d' ' -f1)" = "${OPT[sha256]}" ] || die "sha256 mismatch inside container"
+        rc=0; docker exec -u root "$CONTAINER" "$ctmp/git-policy" admin install --actor "$actor" || rc=$?
+        docker exec -u root "$CONTAINER" rm -rf "$ctmp"
+        exit "$rc" ;;
+    prune-logs)
+        only actor-b64 days; may days '^[1-9][0-9]{0,3}$'
+        actor=$(text actor)
+        args=(admin prune-logs --actor "$actor")
+        [ -n "${OPT[days]+x}" ] && args+=(--days "${OPT[days]}")
+        gp "${args[@]}" ;;
+    backup)
+        only
+        docker exec -u root "$CONTAINER" tar -czf - -C /var/opt/gitlab \
+            git-policy/policies git-policy/state git-policy/membership ;;
+    logs)
+        only date; need date '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+        docker exec -u root "$CONTAINER" sh -c 'f="$1"; [ -f "$f" ] && cat "$f" || true' _ "$GP_ROOT/logs/audit-${OPT[date]}.jsonl" ;;
+    help|-h|--help) usage ;;
+    *) die "verb not allowed: $VERB" ;;
+esac

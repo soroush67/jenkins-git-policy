@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/soroush67/git-policy/internal/audit"
@@ -200,7 +201,26 @@ func Status(l layout.Layout, hookPath string, now time.Time) Report {
 		}
 	}
 	r.AuditLog = auditLogStatus(l, now)
+	if act != nil {
+		r.AuditLog += fmt.Sprintf("; retention %d days", act.Policy.Settings.Audit.RetentionDays)
+		if oldest := oldestAuditFile(l); oldest != "" {
+			r.AuditLog += "; oldest " + oldest
+		}
+	}
 	return r
+}
+
+func oldestAuditFile(l layout.Layout) string {
+	entries, err := os.ReadDir(l.LogsDir())
+	if err != nil {
+		return ""
+	}
+	for _, e := range entries { // ReadDir is sorted: first audit-* is the oldest
+		if strings.HasPrefix(e.Name(), "audit-") && strings.HasSuffix(e.Name(), ".jsonl") {
+			return e.Name()
+		}
+	}
+	return ""
 }
 
 func auditLogStatus(l layout.Layout, now time.Time) string {

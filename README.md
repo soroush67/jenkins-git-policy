@@ -6,9 +6,10 @@ and keeps working when Jenkins, Nexus or the GitLab API are down.
 
 Software version: see `VERSION` (v0.1.0). Policy schema: `apiVersion: git-policy/v1`.
 
-> Status: under phased development (Phases 1-6 done: install, enable/disable/status,
-> atomic policy versions, identity rules, anti-bypass traversal,
-> extension/path, size and PE-signature enforcement). Jenkins is the operator UI (Phase 11). Full documentation (INSTALL, CONFIGURATION,
+> Status: under phased development. Phases 1-9 are done and verified end-to-end on a real
+> GitLab CE 17.10.5 lab (install, enable/disable/status, atomic policy versions, identity
+> rules, anti-bypass traversal, extension/path/size/PE enforcement, audit log).
+> Jenkins is the operator UI (Phase 11). Full documentation (INSTALL, CONFIGURATION,
 > SECURITY, OPERATIONS, TROUBLESHOOTING) arrives in Phase 15.
 > Design: [Phase 1 architecture](docs/design/PHASE-1-ARCHITECTURE.md),
 > [Phase 2 schema & precedence](docs/design/PHASE-2-SCHEMA.md).
@@ -27,7 +28,10 @@ internal/gitscan/      anti-bypass traversal: every new commit, policy classes, 
 internal/{hook,store,state,audit,message,fsutil}/  push runtime, policy versions, engine switch, audit log, output, atomic fs
 tests/integration/     real `git push` tests; tests/examples/verify.sh checks every scenario row (66 pushes)
 install.sh, uninstall.sh  run on the Docker host against the gitlab container
-docs/fa/               راهنمای فارسی
+docs/fa/               Persian docs: GUIDE-FA (guide), CLI-FA (every command/option), EXAMPLES-FA (10 scenarios)
+deploy/git-policy-ctl  the only command Jenkins may run on the Docker host (SSH forced command)
+lab/                   docker-compose lab: GitLab CE 17.10.5 + Jenkins + gp-ctl (lab/up.sh, lab/down.sh)
+tests/gitlab/          end-to-end verification of all phases on the real lab GitLab
 schema/                JSON Schema for editors/CI (Go validator is authoritative)
 examples/              reference policies; examples/scenarios/ = 10 graded scenarios (docs/fa/EXAMPLES-FA.md)
 testdata/policies/     invalid-policy fixtures with expected codes

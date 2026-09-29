@@ -94,7 +94,8 @@
         "MANDATORY_USER_DENIED", "MANDATORY_GROUP_DENIED", "USER_PUSH_DENIED", "GROUP_PUSH_DENIED",
         "BLOCKED_EXTENSION", "BLOCKED_PATH", "BLOCKED_SIGNATURE", "FILE_TOO_LARGE",
         "LIMIT_REF_UPDATES", "LIMIT_COMMITS", "LIMIT_OBJECTS", "EVAL_TIMEOUT",
-        "POLICY_UNAVAILABLE", "MEMBERSHIP_UNAVAILABLE", "INVALID_REF_UPDATE", "INTERNAL_ERROR"
+        "POLICY_UNAVAILABLE", "MEMBERSHIP_UNAVAILABLE", "INVALID_REF_UPDATE", "INTERNAL_ERROR",
+        "AUDIT_UNAVAILABLE"
       ]
     },
     "waivableRuleCode": {
@@ -155,6 +156,7 @@
           "additionalProperties": false,
           "properties": {
             "required": {"type": "boolean"},
+            "log_accepted": {"type": "boolean"},
             "retention_days": {"type": "integer", "minimum": 1, "maximum": 3650}
           }
         },

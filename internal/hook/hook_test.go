@@ -182,3 +182,46 @@ func unlockTree(t *testing.T, root string) {
 		})
 	})
 }
+
+func deployPolicy(t *testing.T, l layout.Layout, src string) {
+	t.Helper()
+	if _, err := store.Apply(l, store.ApplyRequest{Source: []byte(src), Actor: "t", Now: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestAcceptEventsAndAuditRequired(t *testing.T) {
+	l := setup(t)
+	deployPolicy(t, l, "apiVersion: git-policy/v1\nkind: GitPolicy\nmetadata: {name: t, revision: 1}\nsettings: {audit: {log_accepted: true, required: true}}\n")
+	setState(t, l, state.State{Enabled: true})
+	if code, out := run(l, stdin); code != 0 || out != "" {
+		t.Fatalf("code=%d out=%q", code, out)
+	}
+	if a := readAudit(t, l); !strings.Contains(a, `"action":"ACCEPT"`) || !strings.Contains(a, `"refs":[{`) {
+		t.Fatalf("ACCEPT event missing: %s", a)
+	}
+	// Audit log not writable + required: the push must be rejected.
+	f := audit.FileName(l.LogsDir(), time.Now())
+	os.Chmod(f, 0o440)
+	defer os.Chmod(f, 0o640)
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores file modes")
+	}
+	code, out := run(l, stdin)
+	if code != 1 || !strings.Contains(out, "Rule: AUDIT_UNAVAILABLE") {
+		t.Fatalf("required audit: code=%d out=%q", code, out)
+	}
+}
+
+func TestAuditNotRequiredKeepsAccepting(t *testing.T) {
+	l := setup(t)
+	deployPolicy(t, l, "apiVersion: git-policy/v1\nkind: GitPolicy\nmetadata: {name: t, revision: 1}\nsettings: {audit: {log_accepted: true}}\n")
+	setState(t, l, state.State{Enabled: true})
+	run(l, stdin) // creates today's file
+	f := audit.FileName(l.LogsDir(), time.Now())
+	os.Chmod(f, 0o440)
+	defer os.Chmod(f, 0o640)
+	if code, _ := run(l, stdin); code != 0 {
+		t.Fatal("audit.required=false: a failing audit write must not reject")
+	}
+}

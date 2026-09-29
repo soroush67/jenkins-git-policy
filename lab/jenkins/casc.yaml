@@ -1,0 +1,61 @@
+# Jenkins configuration as code (lab). Secrets are read from files mounted
+# under /run/secrets and from the environment, never stored here.
+jenkins:
+  systemMessage: "git-policy control plane (lab)"
+  numExecutors: 2
+  securityRealm:
+    local:
+      allowsSignup: false
+      users:
+        - id: admin
+          password: ${JENKINS_ADMIN_PASSWORD}
+        - id: approver
+          password: ${JENKINS_ADMIN_PASSWORD}
+  authorizationStrategy:
+    loggedInUsersCanDoAnything:
+      allowAnonymousRead: false
+credentials:
+  system:
+    domainCredentials:
+      - credentials:
+          - basicSSHUserPrivateKey:
+              scope: GLOBAL
+              id: git-policy-ssh-test
+              username: gitpolicy-deploy
+              description: "SSH key for the git-policy-ctl forced-command channel (TEST)"
+              privateKeySource:
+                directEntry:
+                  privateKey: ${readFile:/run/secrets/git-policy-ssh-key}
+          - string:
+              scope: GLOBAL
+              id: gitlab-api-readonly
+              description: "GitLab API token (read_api) for membership sync"
+              secret: ${readFile:/run/secrets/gitlab-api-token}
+unclassified:
+  location:
+    url: http://localhost:8081/
+jobs:
+  - script: >
+      pipelineJob('git-policy-status') {
+        description('Lab smoke job: git-policy status through the git-policy-ctl forced-command channel. The full control-plane pipeline arrives in Phase 11.')
+        definition {
+          cps {
+            sandbox(true)
+            script('''
+              pipeline {
+                agent any
+                options { timestamps(); disableConcurrentBuilds() }
+                stages {
+                  stage('git-policy status') {
+                    steps {
+                      sshagent(credentials: ['git-policy-ssh-test']) {
+                        sh 'ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o BatchMode=yes gitpolicy-deploy@gp-ctl status || test $? -eq 1'
+                      }
+                    }
+                  }
+                }
+              }
+            '''.stripIndent())
+          }
+        }
+      }

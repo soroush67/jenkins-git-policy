@@ -247,3 +247,24 @@ func (c *Context) membershipGuard(p *policy.Compiled) error {
 	}
 	return fmt.Errorf("the policy has group deny rules (on_unavailable: deny_if_group_rules) but no membership cache is deployed: every push would be rejected")
 }
+
+// PruneLogs deletes audit files older than the active policy's
+// settings.audit.retention_days (or retentionDays when > 0). The pruning
+// itself is audited.
+func (c *Context) PruneLogs(retentionDays int) ([]string, error) {
+	if retentionDays <= 0 {
+		act, err := store.LoadActive(c.L)
+		if err != nil {
+			return nil, fmt.Errorf("no active policy to read retention_days from (pass --days): %w", err)
+		}
+		retentionDays = act.Policy.Settings.Audit.RetentionDays
+	}
+	unlock, err := c.lock()
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
+	removed, err := audit.Prune(c.L.LogsDir(), retentionDays, c.Now())
+	c.audit(audit.LogsPruned, map[string]any{"retention_days": retentionDays, "removed": removed})
+	return removed, err
+}

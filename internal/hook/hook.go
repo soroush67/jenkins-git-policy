@@ -176,23 +176,40 @@ func Run(l layout.Layout, env Env, stdin io.Reader, stderr io.Writer, now time.T
 	d := eng.Evaluate(req)
 	// Identity decides first and cheaply; objects are only inspected for
 	// pushes that passed it (Phase 6 traversal; content checks in 7-8).
+	var scan *ScanOutcome
 	if !d.Rejected() {
-		_ = ScanPush(eng, d, req, "")
+		scan = ScanPush(eng, d, req, "")
 	}
 
 	base := env.fields()
 	base["policy_version"] = layout.VersionName(act.Version)
 	base["membership"] = d.Membership
+	// Events that document an ACCEPTED push; with settings.audit.required a
+	// push whose record cannot be written is rejected (AUDIT_UNAVAILABLE).
+	var auditErr error
+	record := func(action string, fields map[string]any) {
+		if err := audit.Append(l.LogsDir(), nil, action, fields); err != nil && auditErr == nil {
+			auditErr = err
+		}
+	}
 	for _, w := range d.Waived {
-		_ = audit.Append(l.LogsDir(), nil, audit.ExceptionApplied, violationFields(base, w.Violation, map[string]any{"exception": w.ExceptionID}))
+		record(audit.ExceptionApplied, violationFields(base, w.Violation, map[string]any{"exception": w.ExceptionID}))
 	}
 	for _, v := range d.WouldReject {
-		_ = audit.Append(l.LogsDir(), nil, audit.WouldReject, violationFields(base, v, map[string]any{"mode": "audit"}))
+		record(audit.WouldReject, violationFields(base, v, map[string]any{"mode": "audit"}))
 	}
 	if d.Truncated {
-		_ = audit.Append(l.LogsDir(), nil, audit.FindingsTruncated, base)
+		record(audit.FindingsTruncated, base)
 	}
 	if !d.Rejected() {
+		if pol.Settings.Audit.LogAccepted {
+			record(audit.PushAccepted, acceptFields(base, updates, scan))
+		}
+		if auditErr != nil && pol.Settings.Audit.Required {
+			message.WriteRejection(stderr, message.Rejection{Header: header, Rule: policy.AuditUnavailable,
+				Remediation: policy.DefaultRemediation(policy.AuditUnavailable)})
+			return 1
+		}
 		return 0
 	}
 	rep := message.Report{
@@ -249,6 +266,25 @@ func violationFields(base map[string]any, v engine.Violation, extra map[string]a
 	}
 	for k, x := range extra {
 		f[k] = x
+	}
+	return f
+}
+
+// acceptFields summarises an accepted push for the ACCEPT audit event.
+func acceptFields(base map[string]any, updates []RefUpdate, scan *ScanOutcome) map[string]any {
+	f := make(map[string]any, len(base)+4)
+	for k, v := range base {
+		f[k] = v
+	}
+	refs := make([]map[string]string, 0, len(updates))
+	for _, u := range updates {
+		refs = append(refs, map[string]string{"ref": u.Ref, "old": u.Old, "new": u.New})
+	}
+	f["refs"] = refs
+	if scan != nil && scan.Result != nil {
+		f["commits"] = scan.Result.Stats.Commits
+		f["entries"] = scan.Result.Stats.Entries
+		f["scan_ms"] = scan.Duration.Milliseconds()
 	}
 	return f
 }

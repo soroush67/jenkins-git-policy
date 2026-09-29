@@ -1,0 +1,74 @@
+# Local test lab for git-policy: GitLab CE (same version and Gitaly hook
+# configuration as the target environment), Jenkins (control plane) and a
+# "docker host" gateway reachable only through the git-policy-ctl forced
+# SSH command. Secrets come from .env (created by up.sh, never committed).
+name: git-policy-lab
+
+services:
+  gitlab:
+    image: gitlab/gitlab-ce:17.10.5-ce.0
+    container_name: gitlab
+    hostname: gitlab
+    restart: unless-stopped
+    shm_size: 256m
+    ports:
+      - "8080:80"
+      - "2222:22"
+    environment:
+      GITLAB_ROOT_PASSWORD: ${GITLAB_ROOT_PASSWORD:?run up.sh}
+      GITLAB_OMNIBUS_CONFIG: |
+        external_url 'http://localhost:8080'
+        nginx['listen_port'] = 80
+        gitlab_rails['gitlab_shell_ssh_port'] = 2222
+        gitlab_rails['initial_root_password'] = ENV['GITLAB_ROOT_PASSWORD']
+        gitlab_rails['usage_ping_enabled'] = false
+        gitaly['configuration'] = { hooks: { custom_hooks_dir: '/var/opt/gitlab/gitaly/custom_hooks' } }
+        # lab sizing
+        puma['worker_processes'] = 0
+        sidekiq['concurrency'] = 5
+        prometheus_monitoring['enable'] = false
+    volumes:
+      - gitlab-config:/etc/gitlab
+      - gitlab-logs:/var/log/gitlab
+      - gitlab-data:/var/opt/gitlab
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost/-/readiness"]
+      interval: 30s
+      timeout: 10s
+      retries: 20
+      start_period: 300s
+
+  # Emulates the GitLab Docker host: Jenkins may only run the allow-listed
+  # git-policy-ctl verbs here (SSH forced command), never arbitrary docker.
+  gp-ctl:
+    build: ./ctl   # up.sh copies ../deploy/git-policy-ctl into ./ctl first
+    container_name: gp-ctl
+    hostname: gp-ctl
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./ctl/authorized_keys:/run/authorized_keys:ro
+    environment:
+      GITLAB_CONTAINER: gitlab
+
+  jenkins:
+    build: ./jenkins
+    container_name: gp-jenkins
+    hostname: gp-jenkins
+    restart: unless-stopped
+    ports:
+      - "8081:8080"
+    environment:
+      JENKINS_ADMIN_PASSWORD: ${JENKINS_ADMIN_PASSWORD:?run up.sh}
+      CASC_JENKINS_CONFIG: /usr/share/jenkins/ref/casc.yaml
+      JAVA_OPTS: -Djenkins.install.runSetupWizard=false
+    volumes:
+      - jenkins-home:/var/jenkins_home
+      - ./ctl/jenkins_ctl_key:/run/secrets/git-policy-ssh-key:ro
+      - ./.gitlab-token:/run/secrets/gitlab-api-token:ro
+
+volumes:
+  gitlab-config:
+  gitlab-logs:
+  gitlab-data:
+  jenkins-home:

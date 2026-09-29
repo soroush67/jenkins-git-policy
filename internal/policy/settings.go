@@ -27,6 +27,7 @@ type EffectiveMembership struct {
 type EffectiveAudit struct {
 	Required      bool `json:"required"`
 	RetentionDays int  `json:"retention_days"`
+	LogAccepted   bool `json:"log_accepted"`
 }
 
 type EffectiveMessages struct {
@@ -59,7 +60,7 @@ func (d *Document) Effective() EffectiveSettings {
 		},
 		Limits:                   EffectiveLimits{1000, 50000, 500000, 45},
 		Membership:               EffectiveMembership{2 * 3600, 24 * 3600, OnUnavailableDeny},
-		Audit:                    EffectiveAudit{false, 180},
+		Audit:                    EffectiveAudit{Required: false, RetentionDays: 180},
 		ExceptionMaxLifetimeDays: 180,
 		Messages:                 EffectiveMessages{Header: defaultHeader, Remediation: map[string]string{}},
 	}
@@ -100,6 +101,9 @@ func (d *Document) Effective() EffectiveSettings {
 			e.Audit.Required = *a.Required
 		}
 		setInt(&e.Audit.RetentionDays, a.RetentionDays)
+		if a.LogAccepted != nil {
+			e.Audit.LogAccepted = *a.LogAccepted
+		}
 	}
 	if x := s.Exceptions; x != nil {
 		setInt(&e.ExceptionMaxLifetimeDays, x.MaxLifetimeDays)

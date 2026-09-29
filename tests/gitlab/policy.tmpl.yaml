@@ -1,0 +1,44 @@
+# Policy used by tests/gitlab/verify-gitlab.sh against the real lab GitLab.
+# @S@ is replaced by the run suffix (fresh groups/projects per run),
+# @REV@ by an increasing revision, @EXP@ by a valid expiry date.
+apiVersion: git-policy/v1
+kind: GitPolicy
+metadata: {name: gitlab-lab, revision: @REV@}
+settings:
+  limits: {max_new_commits: 300}
+  audit: {log_accepted: true, required: @REQUIRED@}
+  messages:
+    support: "Help: #devops-help"
+    remediation:
+      BLOCKED_EXTENSION: "Publish binaries as NuGet packages to Nexus instead of committing them."
+mandatory:
+  blocked_extensions: [dll, exe]
+  max_file_size: 20MiB
+defaults:
+  max_file_size: 5MiB
+  refs:
+    "refs/heads/release/**": {blocked_signatures: [pe]}
+namespaces:
+  finance-@S@:
+    blocked_extensions: [pdb]            # scoped rule: used by the fork/MR test
+    blocked_paths: ["**/obj/**"]
+users:
+  alex:
+    projects:
+      finance-@S@/payment-api: {push: deny}
+  intern1:
+    push: deny
+    namespaces:
+      training-@S@: {push: allow}
+groups:
+  contractors-@S@:
+    push: deny
+    namespaces:
+      outsourcing-@S@: {push: allow}
+exceptions:
+  - id: EXC-LAB-SDK
+    rules: [BLOCKED_EXTENSION]
+    mandatory: true
+    scope: {projects: [finance-@S@/reporting], refs: ["refs/heads/main"], paths: ["vendor/sdk/*.dll"]}
+    reason: lab test of a narrow mandatory exception
+    expires: @EXP@

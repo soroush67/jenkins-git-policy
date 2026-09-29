@@ -43,6 +43,7 @@ Usage:
   git-policy admin apply     [--reason TEXT] <policy.yaml | ->
   git-policy admin rollback  --reason TEXT [--to VERSION]
   git-policy admin versions
+  git-policy admin prune-logs [--days N]             delete audit files older than retention_days
     common admin flags: [--root DIR] [--hook-path FILE] [--actor NAME]
 
 Exit codes: 0 ok, 1 invalid/rejected/refused, 2 usage or I/O error.

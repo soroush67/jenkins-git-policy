@@ -61,6 +61,7 @@ type MembershipSettings struct {
 type AuditSettings struct {
 	Required      *bool `yaml:"required"`
 	RetentionDays *int  `yaml:"retention_days"`
+	LogAccepted   *bool `yaml:"log_accepted"`
 }
 
 type ExceptionSettings struct {

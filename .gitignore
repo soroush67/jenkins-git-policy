@@ -3,3 +3,9 @@
 *.swp
 *.swo
 *~
+lab/.env
+lab/.gitlab-token
+lab/ctl/jenkins_ctl_key
+lab/ctl/jenkins_ctl_key.pub
+lab/ctl/authorized_keys
+lab/ctl/git-policy-ctl

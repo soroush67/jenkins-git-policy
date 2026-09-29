@@ -9,8 +9,10 @@ package audit
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"syscall"
 	"time"
 
@@ -18,7 +20,10 @@ import (
 	"github.com/soroush67/git-policy/internal/version"
 )
 
-// Action names of administrative events (push events arrive in Phase 9).
+// Schema identifies the event format for downstream consumers (SIEM).
+const Schema = "git-policy/audit/v1"
+
+// Action names.
 const (
 	PolicyEnabled       = "POLICY_ENABLED"
 	PolicyDisabled      = "POLICY_DISABLED"
@@ -30,6 +35,8 @@ const (
 	HookUninstalled     = "HOOK_UNINSTALLED"
 	PushAllowedDisabled = "PUSH_ALLOWED_ENGINE_DISABLED"
 	PushRejected        = "REJECT"
+	PushAccepted        = "ACCEPT"
+	LogsPruned          = "LOGS_PRUNED"
 	ExceptionApplied    = "EXCEPTION_APPLIED"
 	WouldReject         = "WOULD_REJECT"
 	FindingsTruncated   = "FINDINGS_TRUNCATED"
@@ -52,6 +59,11 @@ func Append(dir string, owner *fsutil.Owner, action string, fields map[string]an
 	ev["timestamp"] = now.Format(time.RFC3339)
 	ev["action"] = action
 	ev["engine_version"] = version.Version
+	ev["schema"] = Schema
+	ev["event_id"] = fsutil.RandomSuffix() + fsutil.RandomSuffix() // de-duplication key for forwarders
+	if h, err := os.Hostname(); err == nil {
+		ev["host"] = h
+	}
 	line, err := json.Marshal(ev) // escapes control characters in all strings
 	if err != nil {
 		return err
@@ -91,4 +103,36 @@ func openLog(path string, owner *fsutil.Owner) (*os.File, error) {
 		}
 	}
 	return f, nil
+}
+
+var fileRe = regexp.MustCompile(`^audit-([0-9]{4}-[0-9]{2}-[0-9]{2})\.jsonl$`)
+
+// Prune deletes daily audit files older than retentionDays (by the date in
+// the file name). Today's and younger files are never touched; other files in
+// the directory (break-glass.log, …) are ignored. Returns the removed names.
+func Prune(dir string, retentionDays int, now time.Time) ([]string, error) {
+	if retentionDays < 1 {
+		return nil, fmt.Errorf("retention must be at least 1 day")
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+	cutoff := now.UTC().Truncate(24*time.Hour).AddDate(0, 0, -retentionDays)
+	var removed []string
+	for _, e := range entries {
+		m := fileRe.FindStringSubmatch(e.Name())
+		if m == nil || !e.Type().IsRegular() {
+			continue
+		}
+		day, err := time.Parse("2006-01-02", m[1])
+		if err != nil || !day.Before(cutoff) {
+			continue
+		}
+		if err := os.Remove(filepath.Join(dir, e.Name())); err != nil {
+			return removed, err
+		}
+		removed = append(removed, e.Name())
+	}
+	return removed, nil
 }

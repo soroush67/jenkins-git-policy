@@ -1,6 +1,10 @@
+<div dir="rtl">
+
 # ۱۰ مثال git-policy، از ساده تا کامل
 
 هر مثال یک فایل policy آماده در `examples/scenarios/` است. **هر ردیف از جدول‌های این سند با یک `git push` واقعی تست شده است** (۶۶ مورد، همه موفق):
+
+<div dir="ltr">
 
 ```bash
 tools/build.sh build
@@ -8,13 +12,19 @@ tests/examples/verify.sh                 # همه‌ی ۱۰ مثال → RESULT:
 tests/examples/verify.sh "" 06 07        # فقط مثال‌های ۶ و ۷
 ```
 
+</div>
+
 برای امتحان هر مثال بدون push:
+
+<div dir="ltr">
 
 ```bash
 B=dist/git-policy-0.1.0-linux-amd64
 $B validate examples/scenarios/05-namespaces-projects.yaml
 $B explain  --policy examples/scenarios/05-namespaces-projects.yaml --user dev --project finance/accounting
 ```
+
+</div>
 
 | # | مثال | مفهوم اصلی | سطح |
 |---|---|---|---|
@@ -37,6 +47,8 @@ $B explain  --policy examples/scenarios/05-namespaces-projects.yaml --user dev -
 
 **هدف:** همان کاری که PoC فعلی (`01-block-dll`) انجام می‌دهد، ولی با موتور کامل.
 
+<div dir="ltr">
+
 ```yaml
 apiVersion: git-policy/v1
 kind: GitPolicy
@@ -46,6 +58,8 @@ metadata:
 mandatory:
   blocked_extensions: [dll]
 ```
+
+</div>
 
 **توضیح:**
 - `apiVersion`، `kind` و `metadata` در هر policy لازم‌اند. `revision` با هر تغییر باید بزرگ‌تر شود.
@@ -66,6 +80,8 @@ mandatory:
 
 **هدف:** چند نوع فایل باینری را ممنوع کنیم و به توسعه‌دهنده بگوییم **چه کار کند**.
 
+<div dir="ltr">
+
 ```yaml
 settings:
   messages:
@@ -80,6 +96,8 @@ mandatory:
 defaults:
   blocked_extensions: [zip, rar, 7z, iso, nupkg] # پیش‌فرض سازمان؛ پروژه‌ها می‌توانند باز کنند
 ```
+
+</div>
 
 **توضیح:**
 - **`mandatory` در برابر `defaults`:** هر دو ممنوع می‌کنند، ولی `defaults` را یک پروژه یا namespace می‌تواند با `unblock_extensions` باز کند (مثال ۵). `mandatory` را هرگز نمی‌تواند.
@@ -96,6 +114,8 @@ defaults:
 
 پیام واقعی‌ای که توسعه‌دهنده می‌بیند:
 
+<div dir="ltr">
+
 ```
 remote: GL-HOOK-ERR: Push rejected by the organizational Git policy.
 remote: GL-HOOK-ERR: User: alex
@@ -111,11 +131,15 @@ remote: GL-HOOK-ERR: Required action (BLOCKED_EXTENSION): Binary dependencies do
 remote: GL-HOOK-ERR: Help: #devops-help
 ```
 
+</div>
+
 ---
 
 ## مثال ۳: محدودیت حجم فایل ⭐⭐
 
 **هدف:** جلوی فایل‌های بزرگ را بگیریم، و یک پروژه‌ی طراحی اجازه‌ی بیشتری داشته باشد.
+
+<div dir="ltr">
 
 ```yaml
 mandatory:
@@ -126,6 +150,8 @@ projects:
   design/assets:
     max_file_size: 40MiB      # این پروژه تا 40MiB، ولی هرگز بالای 50MiB
 ```
+
+</div>
 
 **توضیح:**
 - واحدها باینری‌اند: `KiB`، `MiB`، `GiB`. واحد `MB` قبول نمی‌شود تا ابهام ۱۰۰۰ و ۱۰۲۴ پیش نیاید.
@@ -146,6 +172,8 @@ projects:
 
 **هدف:** روی repositoryهایی که از قبل پر از DLL هستند، قبل از فعال کردن واقعی ببینیم **چه چیزی رد می‌شد**.
 
+<div dir="ltr">
+
 ```yaml
 settings:
   mode: audit                 # قوانین غیر mandatory: فقط ثبت
@@ -155,6 +183,8 @@ mandatory:
 defaults:
   max_file_size: 10MiB
 ```
+
+</div>
 
 **توضیح:**
 - در حالت `audit`، push **قبول می‌شود** ولی در audit log یک رویداد `WOULD_REJECT` با نام فایل، کاربر و پروژه ثبت می‌شود.
@@ -168,15 +198,22 @@ defaults:
 | `src/Program.cs` | ✅ قبول | — |
 
 دیدن نتیجه:
+
+<div dir="ltr">
+
 ```bash
 grep WOULD_REJECT /var/opt/gitlab/git-policy/logs/audit-*.jsonl
 ```
+
+</div>
 
 ---
 
 ## مثال ۵: قوانین مخصوص یک واحد و پروژه ⭐⭐⭐
 
 **هدف:** واحد مالی قوانین سخت‌تری داشته باشد، یک پروژه‌ی خاص استثنای سبکی بگیرد، و یک پروژه‌ی آزمایشی فقط قوانین پایه را داشته باشد.
+
+<div dir="ltr">
 
 ```yaml
 mandatory:
@@ -195,6 +232,8 @@ projects:
   sandbox/playground:
     enabled: false                            # فقط قوانین mandatory
 ```
+
+</div>
 
 **توضیح:**
 - **لیست‌ها جمع می‌شوند:** برای `finance/accounting` ممنوع‌ها می‌شوند `dll, exe` (mandatory) به‌علاوه‌ی `zip` (defaults) به‌علاوه‌ی `pdb` (finance).
@@ -221,6 +260,8 @@ projects:
 
 **هدف:** دسترسی push چند کاربر مشخص را محدود کنیم، علاوه بر مجوزهای خود GitLab.
 
+<div dir="ltr">
+
 ```yaml
 mandatory:
   deny_users: ["@unknown", ex.employee]       # @unknown = push بدون نام کاربری
@@ -237,6 +278,8 @@ users:
       finance/payment-api:
         refs: {"refs/heads/main": deny}       # bob: payment-api بله، ولی نه main
 ```
+
+</div>
 
 **توضیح:**
 - git-policy **جایگزین** مجوزهای GitLab نیست. اگر GitLab اجازه ندهد، push اصلاً به hook نمی‌رسد. git-policy فقط **محدودیت اضافه** می‌گذارد.
@@ -262,6 +305,8 @@ users:
 
 **هدف:** قانون بر اساس عضویت در گروه‌های GitLab، مثلاً پیمانکاران فقط در یک namespace.
 
+<div dir="ltr">
+
 ```yaml
 settings:
   membership:
@@ -285,6 +330,8 @@ users:
       finance: {push: allow}
 ```
 
+</div>
+
 **توضیح:**
 - **عضویت گروه از GitLab API در لحظه‌ی push خوانده نمی‌شود.** از فایل محلی `membership/current.json` خوانده می‌شود که Jenkins به‌طور دوره‌ای به‌روز می‌کند (فاز ۱۰). push هرگز منتظر شبکه نمی‌ماند.
 - **cache کهنه فقط محدود می‌کند:** اگر cache بیش از ۲۴ ساعت عمر داشته باشد، allowهای گروهی نادیده گرفته می‌شوند و denyها می‌مانند.
@@ -303,6 +350,8 @@ users:
 
 دستور `explain` دقیقاً نشان می‌دهد چرا carol مجاز است (خروجی واقعی):
 
+<div dir="ltr">
+
 ```
 $ git-policy explain --policy examples/scenarios/07-groups.yaml --user carol --groups contractors --project finance/app
 Identity
@@ -311,11 +360,15 @@ Identity
 Verdict:     ALLOW
 ```
 
+</div>
+
 ---
 
 ## مثال ۸: شاخه‌های release و تگ‌های نسخه ⭐⭐⭐⭐
 
 **هدف:** روی کدی که منتشر می‌شود قوانین سخت‌تری داشته باشیم.
+
+<div dir="ltr">
 
 ```yaml
 mandatory:
@@ -331,6 +384,8 @@ defaults:
       max_file_size: 5MiB
       blocked_signatures: [pe]
 ```
+
+</div>
 
 **توضیح:**
 - **الگوی ref** کامل نوشته می‌شود: `refs/heads/...` برای شاخه و `refs/tags/...` برای تگ. `*` داخل یک بخش است و `**` چند بخش (`release/**` شامل `release/1.0/hotfix` هم می‌شود).
@@ -350,6 +405,8 @@ defaults:
 ## مثال ۹: استثناهای کنترل‌شده ⭐⭐⭐⭐
 
 **هدف:** برای موارد واقعی و موقت استثنا بدهیم، ولی **محدود، دلیل‌دار و تاریخ‌دار**.
+
+<div dir="ltr">
 
 ```yaml
 settings:
@@ -388,6 +445,8 @@ exceptions:
     expires: 2026-10-31
 ```
 
+</div>
+
 **توضیح:**
 - **استثنا صریح است:** باید بگوید **کدام قانون** (`rules`)، **برای چه کسی** (`subjects`)، **کجا** (`scope`: پروژه، namespace، شاخه، مسیر)، **چرا** (`reason`) و **تا کی** (`expires`).
 - **چیزهایی که validator رد می‌کند:**
@@ -415,6 +474,8 @@ exceptions:
 ## مثال ۱۰: policy کامل سازمانی ⭐⭐⭐⭐⭐
 
 **هدف:** یک policy واقعی تولیدی که همه‌ی مفاهیم را با هم دارد. فایل کامل: `examples/scenarios/10-production.yaml`.
+
+<div dir="ltr">
 
 ```yaml
 settings:
@@ -451,6 +512,8 @@ exceptions:
     ...
 ```
 
+</div>
+
 **توضیح بخش‌های جدید:**
 - **`repository_types`:**
   - wikiها و snippetها فقط قوانین mandatory را می‌گیرند.
@@ -485,3 +548,5 @@ exceptions:
 5. **در آخر:** قوانین کاربر و گروه (۶ و ۷). قوانین گروهی به همگام‌سازی عضویت از Jenkins (فاز ۱۰) نیاز دارند.
 
 > تاریخ `expires` در مثال‌ها ثابت نوشته شده است. قبل از استفاده، آن را به تاریخی حداکثر `max_lifetime_days` روز بعد از امروز تغییر دهید. اسکریپت تست این کار را خودکار انجام می‌دهد.
+
+</div>

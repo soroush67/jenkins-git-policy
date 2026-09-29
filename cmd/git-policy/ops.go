@@ -131,6 +131,7 @@ func cmdAdmin(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	replaceHook := fs.Bool("replace-hook", false, "install: back up and replace a different existing hook")
 	force := fs.Bool("force", false, "uninstall: remove a modified hook wrapper")
 	name := fs.String("name", "", "retire-hook: file name in pre-receive.d, e.g. 01-block-dll")
+	days := fs.Int("days", 0, "prune-logs: retention in days (default: settings.audit.retention_days)")
 	if err := fs.Parse(args[1:]); err != nil {
 		return exitUsage
 	}
@@ -224,6 +225,15 @@ func cmdAdmin(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stdout, "rolled back: %s -> %s\n", versionOrDash(from), layout.VersionName(target))
 	case "versions":
 		return listVersions(ctx.L, stdout, stderr)
+	case "prune-logs":
+		removed, err := ctx.PruneLogs(*days)
+		if err != nil {
+			return fail(err)
+		}
+		fmt.Fprintf(stdout, "pruned %d audit file(s)\n", len(removed))
+		for _, r := range removed {
+			fmt.Fprintf(stdout, "  %s\n", r)
+		}
 	default:
 		fmt.Fprintf(stderr, "git-policy: unknown admin command %q\n\n%s", sub, usage)
 		return exitUsage

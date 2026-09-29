@@ -22,6 +22,7 @@ const (
 	MembershipUnavailable = "MEMBERSHIP_UNAVAILABLE"
 	InvalidRefUpdate      = "INVALID_REF_UPDATE"
 	InternalError         = "INTERNAL_ERROR"
+	AuditUnavailable      = "AUDIT_UNAVAILABLE"
 )
 
 type ruleInfo struct {
@@ -47,6 +48,7 @@ var rules = map[string]ruleInfo{
 	EvalTimeout:     {false, false, "Push in smaller batches."},
 
 	PolicyUnavailable:     {false, false, "The Git policy service is unavailable. Contact the platform team."},
+	AuditUnavailable:      {false, false, "The Git policy audit log is unavailable. Contact the platform team."},
 	MembershipUnavailable: {false, false, "The Git policy service is unavailable. Contact the platform team."},
 	InvalidRefUpdate:      {false, false, "Malformed ref update."},
 	InternalError:         {false, false, "The Git policy service failed. Contact the platform team."},
