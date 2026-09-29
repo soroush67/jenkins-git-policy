@@ -71,6 +71,7 @@ type Report struct {
 	Items       []Item
 	Remediation map[string]string // rule code -> required action
 	Support     string
+	Truncated   bool
 }
 
 // maxItems caps the listed violations; the audit log has all of them.
@@ -110,6 +111,9 @@ func WriteReport(w io.Writer, r Report) {
 		if it.Detail != "" {
 			lines = append(lines, it.Detail)
 		}
+	}
+	if r.Truncated {
+		lines = append(lines, "", "(more findings exist; fix the ones above and push again)")
 	}
 	if n := len(r.Items) - maxItems; n > 0 {
 		lines = append(lines, "", fmt.Sprintf("... and %d more violation(s)", n))

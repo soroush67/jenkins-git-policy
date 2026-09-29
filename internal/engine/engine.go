@@ -61,13 +61,15 @@ type Waiver struct {
 
 // Decision is the result of Evaluate.
 type Decision struct {
-	User       string // normalised subject (@unknown when empty)
-	Project    string // normalised project path
-	RepoType   string // project | wiki | snippet | design | unknown
-	RepoMode   string // all | mandatory_only | none
-	Membership string
-	Violations []Violation // enforced: the push is rejected
-	Waived     []Waiver
+	User        string // normalised subject (@unknown when empty)
+	Project     string // normalised project path
+	RepoType    string // project | wiki | snippet | design | unknown
+	RepoMode    string // all | mandatory_only | none
+	Membership  string
+	Violations  []Violation // enforced: the push is rejected
+	WouldReject []Violation // audit-mode hits: logged, push not blocked
+	Waived      []Waiver
+	Truncated   bool // more findings than recorded (maxRecorded)
 }
 
 // Rejected reports whether the push must be rejected.

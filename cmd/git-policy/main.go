@@ -37,6 +37,7 @@ Usage:
 
   git-policy admin install   [--replace-hook]        install binary, layout, hook wrapper
   git-policy admin uninstall [--force]               remove the hook wrapper (data kept)
+  git-policy admin retire-hook --name FILE           move another pre-receive.d hook (e.g. the PoC) to backup/
   git-policy admin enable    [--reason TEXT]
   git-policy admin disable   --reason TEXT --ttl DURATION   (e.g. 30m, 2h; max 168h)
   git-policy admin apply     [--reason TEXT] <policy.yaml | ->

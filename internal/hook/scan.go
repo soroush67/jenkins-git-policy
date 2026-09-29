@@ -20,9 +20,10 @@ type ScanOutcome struct {
 }
 
 // ScanPush runs the anti-bypass traversal for a push that passed identity
-// checks. Limit and timeout violations are recorded on d; any other failure
-// is recorded as INTERNAL_ERROR (fail closed). dir is the repository
-// ("" = current directory, which is where Gitaly runs hooks).
+// checks and applies the content rules to what it finds. Limit and timeout
+// violations are recorded on d; any other failure is recorded as
+// INTERNAL_ERROR (fail closed). dir is the repository ("" = current
+// directory, which is where Gitaly runs hooks).
 func ScanPush(eng *engine.Engine, d *engine.Decision, req engine.Request, dir string) *ScanOutcome {
 	out := &ScanOutcome{}
 	if d.RepoMode == policy.RepoNone {
@@ -68,6 +69,11 @@ func ScanPush(eng *engine.Engine, d *engine.Decision, req engine.Request, dir st
 	switch {
 	case err == nil:
 		out.Result = res
+		entries := make([]engine.PathEntry, 0, len(res.Entries))
+		for _, e := range res.Entries {
+			entries = append(entries, engine.PathEntry{Ref: e.Ref, Commit: e.Commit, Path: e.Path})
+		}
+		eng.CheckPaths(d, req, cls, entries)
 	case errors.As(err, &le):
 		// already recorded (unwaived) by OnLimit
 	case errors.Is(err, context.DeadlineExceeded):

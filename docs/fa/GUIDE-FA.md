@@ -1,7 +1,7 @@
 # راهنمای فارسی git-policy
 
 > نسخه نرم‌افزار: **v0.1.0** — نسخه schema سیاست: **`git-policy/v1`**
-> وضعیت: فازهای ۱ تا ۶ انجام شده. قوانین **هویت** (کاربر، گروه، namespace، project، ref، استثنا) فعال است و **پیمایش ضد-دور‌زدن** همه‌ی commitهای جدید را پیدا می‌کند. **رد کردن** بر اساس پسوند و حجم فایل در فازهای ۷ و ۸ اضافه می‌شود.
+> وضعیت: فازهای ۱ تا ۷ انجام شده. قوانین **هویت** (کاربر، گروه، پروژه، ref، استثنا) و قوانین **پسوند و مسیر فایل** (DLL، EXE، …) روی **همه‌ی commitهای جدید** اجرا می‌شوند. حجم فایل و امضای PE در فاز ۸ اضافه می‌شوند.
 >
 > **رابط کاربری نهایی این سیستم Jenkins است.** دستورهای `docker exec ... admin` در این راهنما فقط برای تست lab در همین مراحل‌اند؛ در فاز ۱۱ همه‌ی ورودی‌ها و عملیات از طریق Jenkins انجام می‌شود.
 
@@ -48,12 +48,12 @@ Jenkins (Control Plane) ──> فقط مدیریت: apply / enable / disable / 
 | ۳ | اسکلت Go، validator، compiler | ✅ تأیید شده |
 | ۴ | ENABLE / DISABLE / STATUS، apply/rollback اتمیک، نصب | ✅ تأیید شده |
 | ۵ | قوانین هویت و scope (user/group/namespace/project/ref)، استثناها، explain | ✅ تأیید شده |
-| ۶ | پیمایش ضد-دور‌زدن (همه‌ی commitهای جدید)، محدودیت‌ها، timeout | ✅ **انجام شده (منتظر تأیید)** |
-| ۷ | پسوند و مسیر فایل (DLL, EXE, ...) | ⏳ |
+| ۶ | پیمایش ضد-دور‌زدن (همه‌ی commitهای جدید)، محدودیت‌ها، timeout | ✅ تأیید شده |
+| ۷ | پسوند و مسیر فایل (DLL, EXE, ...)، حالت audit، بازنشسته کردن PoC | ✅ **انجام شده (منتظر تأیید)** |
 | ۸ | حجم blob و امضای PE | ⏳ |
 | ۹ به بعد | Audit کامل، cache گروه‌ها، Jenkins، تست، امنیت، کارایی، مستندات | ⏳ |
 
-> ⚠️ **مهم:** در این مرحله موتور **هنوز هیچ فایلی را بر اساس محتوا رد نمی‌کند.** قوانین کاربر/گروه/پروژه (فاز ۵) اجرا می‌شوند؛ جلوگیری از DLL فعلاً همچنان با PoC قدیمی (`01-block-dll`) است که دست‌نخورده باقی می‌ماند.
+> ✅ از فاز ۷ به بعد **git-policy خودش DLL/EXE و مسیرهای ممنوع را رد می‌کند.** PoC قدیمی (`01-block-dll`) تا زمانی که شما روی lab تأیید کنید دست‌نخورده می‌ماند و بعد با `admin retire-hook` بازنشسته می‌شود (بخش ۱۵.۵).
 
 ---
 
@@ -100,6 +100,7 @@ tools/build.sh all       # هر دو
 tests/integration/phase4.sh   # ۳۷ تست: نصب، روشن/خاموش، apply/rollback، fail-closed
 tests/integration/phase5.sh   # ۴۰ تست: قوانین کاربر/گروه/استثنا با git push واقعی
 tests/integration/phase6.sh   # ۲۳ تست: پیمایش ضد-دور‌زدن داخل quarantine گیت، محدودیت‌ها، کارایی
+tests/integration/phase7.sh   # ۴۲ تست: رد DLL/EXE/مسیر با hook واقعی، ترفندهای NTFS، حالت audit، هم‌زمانی
 ```
 
 خروجی مورد انتظار:
@@ -107,6 +108,7 @@ tests/integration/phase6.sh   # ۲۳ تست: پیمایش ضد-دور‌زدن �
 RESULT: 37 passed, 0 failed     (phase4)
 RESULT: 40 passed, 0 failed     (phase5)
 RESULT: 23 passed, 0 failed     (phase6)
+RESULT: 42 passed, 0 failed     (phase7)
 ```
 
 اولین اجرای `tools/build.sh` یک image کوچک به نام `git-policy-build:go1.24` (Go + git) می‌سازد (فقط یک بار، نیاز به اینترنت).
@@ -688,7 +690,111 @@ commits=2 blobs=1 entries=1 exclusion-tips=1 duration=4ms
 
 ---
 
-## ۱۵. واژه‌نامه
+## ۱۵. فاز ۷: پسوند و مسیر فایل
+
+### ۱۵.۱ چه چیزی رد می‌شود؟
+
+هر مسیری که پیمایش فاز ۶ پیدا می‌کند (در **هر** commit جدید) با قوانین مؤثر همان پروژه و شاخه مقایسه می‌شود:
+
+| قانون | مثال | کد |
+|---|---|---|
+| `blocked_extensions` | `dll`، `exe`، `pdb`، `zip`، `tar.gz` | `BLOCKED_EXTENSION` |
+| `blocked_paths` | `**/obj/**`، `**/bin/Debug/**`، `packages/**` | `BLOCKED_PATH` |
+
+**ترفندهای نام فایل** هم شناسایی می‌شوند. هم شکل خام و هم شکل «ویندوزی» نام بررسی می‌شود:
+
+| نام فایل در Git | چرا خطرناک است | نتیجه |
+|---|---|---|
+| `TEST.DLL`، `Test.Dll` | حروف بزرگ | ❌ رد |
+| `evil.dll.`، `evil.dll ` | ویندوز نقطه/فاصله‌ی انتهایی را حذف می‌کند | ❌ رد |
+| `evil.dll::$DATA` | stream پیش‌فرض NTFS | ❌ رد |
+| `README.md` → تغییر نام به `README.dll` | blob جدیدی ساخته نمی‌شود | ❌ رد |
+| فایل `.dll` که با LFS ذخیره شده | فایل اشاره‌گر LFS هم همان نام را دارد | ❌ رد (تصمیم Q6) |
+
+### ۱۵.۲ فایل‌های قدیمی (legacy) در repository
+
+| کار | نتیجه | چرا |
+|---|---|---|
+| **حذف** یک DLL قدیمی | ✅ قبول | هدف همین است |
+| **تغییر** یک DLL قدیمی | ❌ رد | نسخه‌ی جدید یک blob جدید با نام ممنوع است |
+| push بدون دست زدن به DLL قدیمی | ✅ قبول | فقط محتوای **جدید** بررسی می‌شود |
+
+### ۱۵.۳ پیام توسعه‌دهنده
+
+```
+remote: GL-HOOK-ERR: Push rejected by organizational Git policy.
+remote: GL-HOOK-ERR: User: dev
+remote: GL-HOOK-ERR: Project: finance/app
+remote: GL-HOOK-ERR:
+remote: GL-HOOK-ERR: Rule: BLOCKED_EXTENSION
+remote: GL-HOOK-ERR: Ref: refs/heads/main
+remote: GL-HOOK-ERR: Commit: 5c1f0e2a...
+remote: GL-HOOK-ERR: File: Lib/Mic.Caching.dll
+remote: GL-HOOK-ERR: Blocked extension: .dll
+remote: GL-HOOK-ERR:
+remote: GL-HOOK-ERR: Required action (BLOCKED_EXTENSION): Publish binary dependencies as NuGet packages to Nexus instead of committing them.
+remote: GL-HOOK-ERR: Help: #devops-help
+```
+
+- متن «Required action» از `settings.messages.remediation` در policy می‌آید. آدرس Nexus و روش کار با NuGet را همان‌جا بنویسید.
+- Nexus فقط در متن پیام است. در دسترس نبودن Nexus **هیچ اثری** روی بررسی push ندارد.
+- حداکثر ۲۰ مورد در پیام نشان داده می‌شود و حداکثر ۱۰۰۰ مورد در هر push ثبت می‌شود. بقیه با یک یادداشت «more findings» خلاصه می‌شوند.
+
+### ۱۵.۴ رفع مشکل توسط توسعه‌دهنده
+
+اگر DLL در یک commit قدیمی‌تر همین push اضافه شده باشد، حذف آن در commit بعدی **کافی نیست**، چون در تاریخچه می‌ماند. باید تاریخچه‌ی محلی بازنویسی شود:
+
+```bash
+git rebase -i origin/main          # commit مربوطه را edit کنید و فایل را حذف کنید
+# یا:
+git reset --soft origin/main && git rm --cached Lib/*.dll && git commit -m "..."
+```
+
+### ۱۵.۵ برنامه‌ی جایگزینی PoC روی lab (پیشنهادی)
+
+```bash
+GP="docker exec -u root gitlab /var/opt/gitlab/git-policy/bin/git-policy"
+./install.sh --actor soroush                       # ارتقا به نسخه‌ی فاز ۷
+```
+
+**گام ۱: حالت audit.** git-policy فقط ثبت می‌کند و PoC همچنان رد می‌کند.
+
+policy با `mandatory: {mode: audit, blocked_extensions: [dll, exe]}` و `settings: {mode: audit}` و یک revision جدید:
+```bash
+$GP admin apply  --actor soroush --reason "phase7 shadow" /tmp/p7.yaml
+# چند push معمولی و یک push با DLL؛ سپس:
+docker exec gitlab sh -c 'grep WOULD_REJECT /var/opt/gitlab/git-policy/logs/audit-*.jsonl | tail'
+```
+
+**گام ۲: حالت enforce.** اکنون هم PoC و هم git-policy رد می‌کنند.
+
+همان policy با `mode: enforce` و revision بالاتر. push با DLL باید پیام `Rule: BLOCKED_EXTENSION` را نشان دهد. این را از CLI و از Web UI امتحان کنید.
+
+**گام ۳: بازنشسته کردن PoC** (غیرمخرب؛ یک نسخه در `backup/` می‌ماند و در audit log ثبت می‌شود):
+```bash
+$GP admin retire-hook --actor soroush --name 01-block-dll
+docker exec gitlab ls -l /var/opt/gitlab/gitaly/custom_hooks/pre-receive.d/    # فقط 50-git-policy
+```
+بعد از آن push با DLL باید **فقط** با پیام git-policy رد شود.
+
+برای برگرداندن PoC (در صورت نیاز):
+```bash
+docker exec -u root gitlab sh -c 'cp /var/opt/gitlab/git-policy/backup/01-block-dll.retired.* /var/opt/gitlab/gitaly/custom_hooks/pre-receive.d/01-block-dll && chmod 0755 /var/opt/gitlab/gitaly/custom_hooks/pre-receive.d/01-block-dll'
+```
+
+### ۱۵.۶ رویدادهای جدید audit
+
+| action | معنی |
+|---|---|
+| `REJECT` (با `file` و `commit`) | فایل ممنوع؛ push رد شد |
+| `WOULD_REJECT` | در حالت audit: رد **می‌شد**، ولی push قبول شد |
+| `EXCEPTION_APPLIED` (با `file`) | یک استثنا این فایل را مجاز کرد |
+| `FINDINGS_TRUNCATED` | بیش از ۱۰۰۰ مورد در یک push |
+| `HOOK_RETIRED` | یک hook دیگر (مثلاً PoC) به backup منتقل شد |
+
+---
+
+## ۱۶. واژه‌نامه
 
 | واژه | معنی |
 |---|---|
@@ -705,4 +811,5 @@ commits=2 blobs=1 entries=1 exclusion-tips=1 duration=4ms
 | **Membership cache** | فایل محلی عضویت کاربران در گروه‌های GitLab؛ push هرگز منتظر GitLab API نمی‌ماند |
 | **explain** | شبیه‌سازی تصمیم policy برای یک push فرضی، بدون push واقعی |
 | **Quarantine** | پوشه‌ی موقتی که Git شیءهای push‌شده را تا پایان pre-receive در آن نگه می‌دارد |
+| **Audit mode (shadow)** | حالتی که تخلف فقط با `WOULD_REJECT` ثبت می‌شود و push رد نمی‌شود؛ برای rollout امن |
 | **کلاس سیاست** | مجموعه‌ی refهایی که قوانین محتوایی یکسان دارند؛ برای تعیین «قبلاً بررسی‌شده» استفاده می‌شود |

@@ -130,6 +130,7 @@ func cmdAdmin(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	to := fs.String("to", "", "rollback target version, e.g. 000003 or 3")
 	replaceHook := fs.Bool("replace-hook", false, "install: back up and replace a different existing hook")
 	force := fs.Bool("force", false, "uninstall: remove a modified hook wrapper")
+	name := fs.String("name", "", "retire-hook: file name in pre-receive.d, e.g. 01-block-dll")
 	if err := fs.Parse(args[1:]); err != nil {
 		return exitUsage
 	}
@@ -169,6 +170,12 @@ func cmdAdmin(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		} else {
 			fmt.Fprintf(stdout, "hook wrapper removed (backup: %s); policy, state and logs kept\n", backup)
 		}
+	case "retire-hook":
+		backup, err := ctx.RetireHook(*name)
+		if err != nil {
+			return fail(err)
+		}
+		fmt.Fprintf(stdout, "hook %s retired (backup: %s)\n", *name, backup)
 	case "enable":
 		if err := ctx.Enable(*reason); err != nil {
 			return fail(err)

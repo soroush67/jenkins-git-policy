@@ -31,6 +31,9 @@ const (
 	PushAllowedDisabled = "PUSH_ALLOWED_ENGINE_DISABLED"
 	PushRejected        = "REJECT"
 	ExceptionApplied    = "EXCEPTION_APPLIED"
+	WouldReject         = "WOULD_REJECT"
+	FindingsTruncated   = "FINDINGS_TRUNCATED"
+	HookRetired         = "HOOK_RETIRED"
 )
 
 // FileName returns the audit file for the UTC day of t.

@@ -74,13 +74,14 @@ func cmdScan(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	out := hook.ScanPush(eng, d, req, *dir)
 
 	type report struct {
-		Skipped    bool               `json:"skipped"`
-		SkipReason string             `json:"skip_reason,omitempty"`
-		DurationMS int64              `json:"duration_ms"`
-		Stats      any                `json:"stats,omitempty"`
-		RefCommits map[string]int     `json:"ref_commits,omitempty"`
-		Entries    any                `json:"entries"`
-		Violations []engine.Violation `json:"violations"`
+		Skipped     bool               `json:"skipped"`
+		SkipReason  string             `json:"skip_reason,omitempty"`
+		DurationMS  int64              `json:"duration_ms"`
+		Stats       any                `json:"stats,omitempty"`
+		RefCommits  map[string]int     `json:"ref_commits,omitempty"`
+		Entries     any                `json:"entries"`
+		Violations  []engine.Violation `json:"violations"`
+		WouldReject []engine.Violation `json:"would_reject"`
 	}
 	r := report{Skipped: out.Skipped, SkipReason: out.SkipReason, DurationMS: out.Duration.Milliseconds(),
 		Violations: d.Violations, Entries: []any{}}
@@ -92,6 +93,10 @@ func cmdScan(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	}
 	if r.Violations == nil {
 		r.Violations = []engine.Violation{}
+	}
+	r.WouldReject = d.WouldReject
+	if r.WouldReject == nil {
+		r.WouldReject = []engine.Violation{}
 	}
 	if *asJSON {
 		writeJSON(stdout, r)
@@ -111,7 +116,10 @@ func cmdScan(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 			}
 		}
 		for _, v := range d.Violations {
-			fmt.Fprintf(stdout, "VIOLATION %s: %s\n", v.Code, v.Detail)
+			fmt.Fprintf(stdout, "VIOLATION %s %q: %s\n", v.Code, v.Path, v.Detail)
+		}
+		for _, v := range d.WouldReject {
+			fmt.Fprintf(stdout, "WOULD_REJECT (audit mode) %s %q: %s\n", v.Code, v.Path, v.Detail)
 		}
 	}
 	if len(d.Violations) > 0 {

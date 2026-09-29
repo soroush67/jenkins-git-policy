@@ -186,15 +186,25 @@ func Run(l layout.Layout, env Env, stdin io.Reader, stderr io.Writer, now time.T
 	for _, w := range d.Waived {
 		_ = audit.Append(l.LogsDir(), nil, audit.ExceptionApplied, violationFields(base, w.Violation, map[string]any{"exception": w.ExceptionID}))
 	}
+	for _, v := range d.WouldReject {
+		_ = audit.Append(l.LogsDir(), nil, audit.WouldReject, violationFields(base, v, map[string]any{"mode": "audit"}))
+	}
+	if d.Truncated {
+		_ = audit.Append(l.LogsDir(), nil, audit.FindingsTruncated, base)
+	}
 	if !d.Rejected() {
 		return 0
 	}
 	rep := message.Report{
 		Header: header, User: displayUser(d.User), Project: env.ProjectPath,
 		Remediation: pol.Settings.Messages.Remediation, Support: pol.Settings.Messages.Support,
+		Truncated: d.Truncated,
 	}
 	for _, v := range d.Violations {
 		it := message.Item{Rule: v.Code, Ref: v.Ref, File: v.Path}
+		if v.Code == policy.BlockedExtension || v.Code == policy.BlockedPath {
+			it.Detail = v.Detail
+		}
 		if !IsZero(v.New) {
 			it.Commit = v.New
 		}

@@ -199,3 +199,40 @@ func otherHooks(dir, self string) []string {
 	sort.Strings(out)
 	return out
 }
+
+var hookNameRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`)
+
+// RetireHook moves another global pre-receive hook (e.g. the 01-block-dll
+// PoC once git-policy enforces the same rule) out of pre-receive.d into
+// backup/. Nothing is deleted without a copy, and the action is audited.
+// Restore: copy the backup file back and chmod 0755.
+func (c *Context) RetireHook(name string) (string, error) {
+	if c.HookPath == "" {
+		return "", errors.New("--hook-path is required with a custom --root")
+	}
+	if !hookNameRe.MatchString(name) || name == filepath.Base(c.HookPath) {
+		return "", fmt.Errorf("invalid hook name %q (and git-policy's own hook is removed with admin uninstall)", name)
+	}
+	path := filepath.Join(filepath.Dir(c.HookPath), name)
+	cur, err := fsutil.ReadFileNoFollow(path, 16<<20)
+	if err != nil {
+		return "", fmt.Errorf("%s: %w", path, err)
+	}
+	unlock, err := c.lock()
+	if err != nil {
+		return "", err
+	}
+	defer unlock()
+	backup := filepath.Join(c.L.BackupDir(), name+".retired."+c.Now().UTC().Format("20060102T150405Z"))
+	if err := fsutil.WriteFileAtomic(backup, cur, 0o600, c.RootOwn); err != nil {
+		return "", err
+	}
+	if err := os.Remove(path); err != nil {
+		return "", err
+	}
+	if err := fsutil.SyncDir(filepath.Dir(path)); err != nil {
+		return "", err
+	}
+	c.audit(audit.HookRetired, map[string]any{"hook": path, "backup": backup})
+	return backup, nil
+}
