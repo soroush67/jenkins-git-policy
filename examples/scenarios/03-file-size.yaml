@@ -1,0 +1,13 @@
+# Scenario 03: file size limits with a hard organizational cap.
+apiVersion: git-policy/v1
+kind: GitPolicy
+metadata:
+  name: file-size
+  revision: 1
+mandatory:
+  max_file_size: 50MiB        # hard cap: nothing can raise it (except a mandatory exception)
+defaults:
+  max_file_size: 10MiB        # normal projects
+projects:
+  design/assets:
+    max_file_size: 40MiB      # a design project may go up to 40MiB, never above 50MiB

@@ -1,0 +1,13 @@
+# Scenario 04: safe rollout — log what WOULD be rejected, block nothing yet.
+apiVersion: git-policy/v1
+kind: GitPolicy
+metadata:
+  name: audit-rollout
+  revision: 1
+settings:
+  mode: audit                 # non-mandatory rules: log only
+mandatory:
+  mode: audit                 # mandatory rules: log only
+  blocked_extensions: [dll, exe]
+defaults:
+  max_file_size: 10MiB

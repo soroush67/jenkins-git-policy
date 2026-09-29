@@ -140,6 +140,7 @@ exceptions: [ ... ]              # استثناهای صریح، محدود و �
 ```
 
 نمونه‌ی کامل: `examples/policy.example.yaml`
+**۱۰ مثال از ساده تا کامل (با توضیح فارسی و تست‌شده):** [`docs/fa/EXAMPLES-FA.md`](EXAMPLES-FA.md)
 مرجع دقیق: `docs/design/PHASE-2-SCHEMA.md`
 
 ### ۵.۲ سه نوع قانون

@@ -1,0 +1,9 @@
+# Scenario 01 (simplest): the PoC behaviour — no DLL anywhere, in any case.
+apiVersion: git-policy/v1
+kind: GitPolicy
+metadata:
+  name: block-dll-only
+  revision: 1
+  description: Same behaviour as the 01-block-dll PoC hook.
+mandatory:
+  blocked_extensions: [dll]

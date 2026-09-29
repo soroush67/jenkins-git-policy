@@ -1,0 +1,62 @@
+# Scenario 10 (complete): an organization-wide production policy.
+apiVersion: git-policy/v1
+kind: GitPolicy
+metadata:
+  name: org-production
+  revision: 1
+  description: Organization-wide Git policy (identity, binaries, sizes, release hardening).
+settings:
+  mode: enforce
+  repository_types: {project: all, wiki: mandatory_only, snippet: mandatory_only, design: none}
+  limits: {max_ref_updates: 500, max_new_commits: 20000, max_new_blobs: 200000, evaluation_timeout: 45s}
+  membership: {soft_max_age: 2h, hard_max_age: 24h, on_unavailable: deny_if_group_rules}
+  audit: {retention_days: 365}
+  exceptions: {max_lifetime_days: 120}
+  messages:
+    header: "Push rejected by the organizational Git policy."
+    support: "Help: #devops-help"
+    remediation:
+      BLOCKED_EXTENSION: >-
+        Binary dependencies do not belong in Git. Publish them as NuGet packages
+        to Nexus and reference them with PackageReference.
+      BLOCKED_SIGNATURE: "This file is a Windows executable or library whatever its name. Publish it to Nexus."
+      FILE_TOO_LARGE: "Store large artifacts in Nexus (raw-hosted) and reference them by version."
+      BLOCKED_PATH: "Build output must not be committed. Add bin/ and obj/ to .gitignore."
+mandatory:
+  mode: enforce
+  blocked_extensions: [dll, exe, msi, sys]
+  max_file_size: 100MiB
+  deny_users: [ex.employee]
+  deny_groups: [offboarding]
+defaults:
+  blocked_extensions: [pdb, nupkg, zip, rar, 7z, iso]
+  blocked_paths: ["**/bin/Debug/**", "**/bin/Release/**", "**/obj/**"]
+  max_file_size: 20MiB
+  refs:
+    "refs/heads/release/**": {blocked_signatures: [pe], max_file_size: 10MiB}
+namespaces:
+  finance:
+    max_file_size: 10MiB
+  finance/legacy:
+    mode: audit
+projects:
+  design/assets: {max_file_size: 80MiB}
+  sandbox/playground: {enabled: false}
+users:
+  intern1:
+    push: deny
+    namespaces:
+      training: {push: allow}
+groups:
+  contractors:
+    push: deny
+    namespaces:
+      outsourcing: {push: allow}
+exceptions:
+  - id: EXC-ERP-SDK
+    rules: [BLOCKED_EXTENSION]
+    mandatory: true
+    scope: {projects: [finance/legacy-erp], refs: ["refs/heads/main"], paths: ["vendor/VendorSdk/*.dll"]}
+    reason: Vendor SDK has no NuGet package yet
+    ticket: INFRA-2231
+    expires: 2026-12-31

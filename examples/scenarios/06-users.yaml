@@ -1,0 +1,20 @@
+# Scenario 06: rules for individual users.
+apiVersion: git-policy/v1
+kind: GitPolicy
+metadata:
+  name: user-rules
+  revision: 1
+mandatory:
+  deny_users: ["@unknown", ex.employee]       # @unknown = push without GL_USERNAME
+users:
+  alex:
+    projects:
+      finance/payment-api: {push: deny}       # alex: everything except payment-api
+  intern1:
+    push: deny                                # intern1: nothing ...
+    namespaces:
+      training: {push: allow}                 # ... except training/* (more specific wins)
+  bob:
+    projects:
+      finance/payment-api:
+        refs: {"refs/heads/main": deny}       # bob: payment-api yes, but not main

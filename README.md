@@ -25,11 +25,11 @@ internal/engine/       push evaluation: identity, scope, exceptions, effective c
 internal/membership/   local group-membership cache (no GitLab API on the push path)
 internal/gitscan/      anti-bypass traversal: every new commit, policy classes, tags, limits (git plumbing only)
 internal/{hook,store,state,audit,message,fsutil}/  push runtime, policy versions, engine switch, audit log, output, atomic fs
-tests/integration/     real `git push` tests
+tests/integration/     real `git push` tests; tests/examples/verify.sh checks every scenario row (66 pushes)
 install.sh, uninstall.sh  run on the Docker host against the gitlab container
 docs/fa/               راهنمای فارسی
 schema/                JSON Schema for editors/CI (Go validator is authoritative)
-examples/              reference policies
+examples/              reference policies; examples/scenarios/ = 10 graded scenarios (docs/fa/EXAMPLES-FA.md)
 testdata/policies/     invalid-policy fixtures with expected codes
 tools/build.sh         docker-based vendor/test/build (no Go needed on the host)
 ```

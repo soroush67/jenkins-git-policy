@@ -1,0 +1,18 @@
+# Scenario 02: several binary types + a helpful Nexus/NuGet message.
+apiVersion: git-policy/v1
+kind: GitPolicy
+metadata:
+  name: binaries-nexus
+  revision: 1
+settings:
+  messages:
+    header: "Push rejected by the organizational Git policy."
+    support: "Help: #devops-help"
+    remediation:
+      BLOCKED_EXTENSION: >-
+        Binary dependencies do not belong in Git. Publish them as NuGet packages
+        to Nexus (nuget-hosted) and reference them with PackageReference.
+mandatory:
+  blocked_extensions: [dll, exe, pdb, msi]      # never, anywhere
+defaults:
+  blocked_extensions: [zip, rar, 7z, iso, nupkg] # organization default, overridable

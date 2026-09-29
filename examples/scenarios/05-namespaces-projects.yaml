@@ -1,0 +1,21 @@
+# Scenario 05: stricter rules for one department, per-project adjustments.
+apiVersion: git-policy/v1
+kind: GitPolicy
+metadata:
+  name: namespaces-projects
+  revision: 1
+mandatory:
+  blocked_extensions: [dll, exe]
+defaults:
+  blocked_extensions: [zip]
+namespaces:
+  finance:                                    # applies to finance/* and deeper
+    blocked_extensions: [pdb]
+    blocked_paths: ["**/bin/Debug/**", "**/bin/Release/**", "**/obj/**"]
+  finance/legacy:
+    mode: audit                               # legacy projects: non-mandatory rules only logged
+projects:
+  finance/reporting:
+    unblock_extensions: [zip]                 # reporting ships zipped templates
+  sandbox/playground:
+    enabled: false                            # only mandatory rules apply

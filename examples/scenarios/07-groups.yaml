@@ -1,0 +1,26 @@
+# Scenario 07: rules for GitLab groups (local membership cache, no API on push).
+apiVersion: git-policy/v1
+kind: GitPolicy
+metadata:
+  name: group-rules
+  revision: 1
+settings:
+  membership:
+    soft_max_age: 2h
+    hard_max_age: 24h
+    on_unavailable: deny_if_group_rules
+mandatory:
+  deny_groups: [offboarding]                  # members of offboarding: never
+groups:
+  contractors:
+    push: deny                                # contractors: nothing ...
+    namespaces:
+      outsourcing: {push: allow}              # ... except outsourcing/*
+  qa:
+    projects:
+      finance/payment-api:
+        refs: {"refs/heads/release/**": deny} # QA must not push to release branches
+users:
+  carol:                                      # carol is a contractor, but explicitly
+    namespaces:                               # allowed in finance (more specific level)
+      finance: {push: allow}

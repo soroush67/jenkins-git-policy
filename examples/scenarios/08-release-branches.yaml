@@ -1,0 +1,18 @@
+# Scenario 08: stricter rules for release branches and version tags.
+apiVersion: git-policy/v1
+kind: GitPolicy
+metadata:
+  name: release-branches
+  revision: 1
+mandatory:
+  blocked_extensions: [dll, exe]
+  max_file_size: 50MiB
+defaults:
+  max_file_size: 20MiB
+  refs:
+    "refs/heads/release/**":
+      max_file_size: 5MiB
+      blocked_signatures: [pe]      # Windows executables by CONTENT, whatever the name
+    "refs/tags/v*":
+      max_file_size: 5MiB
+      blocked_signatures: [pe]

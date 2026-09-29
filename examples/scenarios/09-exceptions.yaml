@@ -1,0 +1,44 @@
+# Scenario 09: explicit, narrow, expiring exceptions.
+apiVersion: git-policy/v1
+kind: GitPolicy
+metadata:
+  name: exceptions
+  revision: 1
+settings:
+  limits:
+    max_new_commits: 1000
+  exceptions:
+    max_lifetime_days: 180
+mandatory:
+  blocked_extensions: [dll, exe]
+  max_file_size: 50MiB
+defaults:
+  max_file_size: 10MiB
+exceptions:
+  - id: EXC-2026-001                          # one vendored SDK, one project, main only
+    rules: [BLOCKED_EXTENSION]
+    mandatory: true
+    scope:
+      projects: [finance/legacy-erp]
+      refs: ["refs/heads/main"]
+      paths: ["vendor/VendorSdk/*.dll"]
+    reason: Vendor SDK has no NuGet package yet
+    ticket: INFRA-2231
+    approved_by: security-team
+    expires: 2026-12-31
+  - id: EXC-2026-002                          # one user may push models up to 80MiB
+    rules: [FILE_TOO_LARGE]
+    mandatory: true                           # needed: 80MiB is above the 50MiB cap
+    subjects: {users: [ds1]}
+    scope: {projects: [analytics/forecast]}
+    max_file_size: 80MiB
+    reason: ML model snapshots until the artifact store is ready
+    ticket: DS-118
+    expires: 2026-12-15
+  - id: EXC-2026-003                          # history import may exceed the commit limit
+    rules: [LIMIT_COMMITS]
+    subjects: {users: [svc-migration]}
+    scope: {namespaces: [legacy]}
+    reason: One-time import of the SVN history
+    ticket: INFRA-2240
+    expires: 2026-10-31
