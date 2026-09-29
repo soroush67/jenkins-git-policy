@@ -1,7 +1,7 @@
 // Package hook is the pre-receive runtime invoked by the Gitaly wrapper.
 //
-// Order: engine state -> active policy -> ref-update parsing -> engine
-// evaluation (Phase 5: limits, identity, exceptions; content in Phases 6-8),
+// Order: engine state -> active policy -> ref-update parsing -> identity,
+// limits and exceptions -> object traversal (Phase 6; content rules 7-8),
 // with the fail-closed behaviour of PHASE-1 §6.
 package hook
 
@@ -172,7 +172,13 @@ func Run(l layout.Layout, env Env, stdin io.Reader, stderr io.Writer, now time.T
 	for _, u := range updates {
 		req.Updates = append(req.Updates, engine.RefUpdate{Old: u.Old, New: u.New, Ref: u.Ref})
 	}
-	d := engine.New(pol).Evaluate(req)
+	eng := engine.New(pol)
+	d := eng.Evaluate(req)
+	// Identity decides first and cheaply; objects are only inspected for
+	// pushes that passed it (Phase 6 traversal; content checks in 7-8).
+	if !d.Rejected() {
+		_ = ScanPush(eng, d, req, "")
+	}
 
 	base := env.fields()
 	base["policy_version"] = layout.VersionName(act.Version)

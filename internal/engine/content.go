@@ -2,6 +2,8 @@ package engine
 
 import (
 	"sort"
+	"strconv"
+	"strings"
 
 	"github.com/soroush67/git-policy/internal/policy"
 )
@@ -153,4 +155,83 @@ func merge(a, b policy.ContentSet) policy.ContentSet {
 		Paths:      append(append([]string{}, a.Paths...), b.Paths...),
 		Signatures: append(append([]string{}, a.Signatures...), b.Signatures...),
 	}
+}
+
+// HasRules reports whether any content rule applies (otherwise the push
+// needs no object inspection at all).
+func (c Content) HasRules() bool {
+	return len(c.Extensions)+len(c.Paths)+len(c.Signatures) > 0 || c.MaxFileSize > 0
+}
+
+// Classifier assigns refs of one project to policy classes: refs whose
+// effective content rules are identical share a class (PHASE-1 R1-2).
+type Classifier struct {
+	e                 *Engine
+	project, repoMode string
+	byKey             map[string]int
+	byRef             map[string]int
+	contents          []Content
+}
+
+// Classifier returns a classifier for one project.
+func (e *Engine) Classifier(project, repoMode string) *Classifier {
+	return &Classifier{e: e, project: project, repoMode: repoMode, byKey: map[string]int{}, byRef: map[string]int{}}
+}
+
+// ClassOf returns the class id of ref.
+func (c *Classifier) ClassOf(ref string) int {
+	if id, ok := c.byRef[ref]; ok {
+		return id
+	}
+	content := c.e.ResolveContent(c.project, ref, c.repoMode)
+	key := fingerprint(content)
+	id, ok := c.byKey[key]
+	if !ok {
+		id = len(c.contents)
+		c.contents = append(c.contents, content)
+		c.byKey[key] = id
+	}
+	c.byRef[ref] = id
+	return id
+}
+
+// Content returns the effective content rules of a class.
+func (c *Classifier) Content(id int) Content { return c.contents[id] }
+
+// Covers reports whether content already vetted under class a counts as
+// vetted for class b: a is at least as strict as b in every dimension.
+func (c *Classifier) Covers(a, b int) bool {
+	if a == b {
+		return true
+	}
+	x, y := c.contents[a], c.contents[b]
+	superset := func(p, q map[string]Entry) bool {
+		for k := range q {
+			if _, ok := p[k]; !ok {
+				return false
+			}
+		}
+		return true
+	}
+	if !superset(x.Extensions, y.Extensions) || !superset(x.Paths, y.Paths) || !superset(x.Signatures, y.Signatures) {
+		return false
+	}
+	if y.MaxFileSize > 0 && (x.MaxFileSize == 0 || x.MaxFileSize > y.MaxFileSize) {
+		return false
+	}
+	// Content accepted in audit mode was never actually enforced.
+	return !(y.Mode == "enforce" && x.Mode != "enforce")
+}
+
+func fingerprint(c Content) string {
+	keys := func(m map[string]Entry) string {
+		ks := make([]string, 0, len(m))
+		for k := range m {
+			ks = append(ks, k)
+		}
+		sort.Strings(ks)
+		return strings.Join(ks, "\x1f")
+	}
+	return strings.Join([]string{keys(c.Extensions), keys(c.Paths), keys(c.Signatures),
+		strconv.FormatInt(c.MaxFileSize, 10), c.Mode, c.MandatoryMode, strconv.FormatBool(c.Enabled)}, "\x1e")
 }

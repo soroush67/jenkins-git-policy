@@ -32,6 +32,7 @@ Usage:
   git-policy compile  [--now YYYY-MM-DD] [-o compiled.json] <policy.yaml | ->
   git-policy status   [--json] [--root DIR] [--hook-path FILE]
   git-policy explain  --project PATH [--user NAME] [--groups a,b] [--ref REF] [--policy FILE] [--json]
+  git-policy scan     [--policy FILE] [--project PATH] [--repo DIR] [--json] < ref-updates   (diagnostics)
   git-policy hook     [--root DIR]                 (run by the pre-receive wrapper)
 
   git-policy admin install   [--replace-hook]        install binary, layout, hook wrapper
@@ -69,6 +70,8 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return cmdStatus(args[1:], stdout, stderr)
 	case "explain":
 		return cmdExplain(args[1:], stdout, stderr)
+	case "scan":
+		return cmdScan(args[1:], stdin, stdout, stderr)
 	case "admin":
 		return cmdAdmin(args[1:], stdin, stdout, stderr)
 	case "help", "-h", "--help":

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Build and test git-policy inside a Go container: no Go toolchain needed on
-# the host. Dependencies are vendored, so test/build work offline after the
+# Build and test git-policy inside a Go container (Go + git, see
+# tools/Dockerfile.build): no Go toolchain needed on the host. Dependencies are vendored, so test/build work offline after the
 # first `vendor` run.
 #
 #   tools/build.sh vendor   # go mod tidy + vendor (needs network once)
@@ -10,13 +10,18 @@
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-GO_IMAGE=${GO_IMAGE:-golang:1.24-alpine}
+GO_IMAGE=${GO_IMAGE:-git-policy-build:go1.24}
 VERSION=$(tr -d '[:space:]' < "$ROOT/VERSION")
 COMMIT=$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo unknown)
 BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 PKG=github.com/soroush67/git-policy/internal/version
 
 mkdir -p "$ROOT/.cache/go-build" "$ROOT/.cache/gomod" "$ROOT/dist"
+
+# The build image (Go + git) is built once from tools/Dockerfile.build.
+if ! docker image inspect "$GO_IMAGE" >/dev/null 2>&1; then
+    docker build -q -t "$GO_IMAGE" -f "$ROOT/tools/Dockerfile.build" "$ROOT/tools" >/dev/null
+fi
 
 go_run() {
     docker run --rm \

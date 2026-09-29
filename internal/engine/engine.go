@@ -232,6 +232,13 @@ func (e *Engine) Evaluate(r Request) *Decision {
 	return d
 }
 
+// Record records v on d unless an exception waives it; it reports whether
+// v was waived. Used for violations found outside Evaluate (scan limits,
+// content rules).
+func (e *Engine) Record(d *Decision, r Request, v Violation) bool {
+	return e.violate(d, r, lowerAll(r.Membership.Groups), v)
+}
+
 // violate records v unless an exception waives it; reports whether waived.
 func (e *Engine) violate(d *Decision, r Request, groups []string, v Violation) bool {
 	if x := e.findException(d, r, groups, v); x != nil {

@@ -1,7 +1,7 @@
 # راهنمای فارسی git-policy
 
 > نسخه نرم‌افزار: **v0.1.0** — نسخه schema سیاست: **`git-policy/v1`**
-> وضعیت: فازهای ۱ تا ۵ انجام شده. قوانین **هویت** (کاربر، گروه، namespace، project، ref، استثنا) فعال است. قوانین **محتوا** (DLL، حجم فایل) در فازهای ۶ تا ۸ اضافه می‌شوند.
+> وضعیت: فازهای ۱ تا ۶ انجام شده. قوانین **هویت** (کاربر، گروه، namespace، project، ref، استثنا) فعال است و **پیمایش ضد-دور‌زدن** همه‌ی commitهای جدید را پیدا می‌کند. **رد کردن** بر اساس پسوند و حجم فایل در فازهای ۷ و ۸ اضافه می‌شود.
 >
 > **رابط کاربری نهایی این سیستم Jenkins است.** دستورهای `docker exec ... admin` در این راهنما فقط برای تست lab در همین مراحل‌اند؛ در فاز ۱۱ همه‌ی ورودی‌ها و عملیات از طریق Jenkins انجام می‌شود.
 
@@ -47,8 +47,8 @@ Jenkins (Control Plane) ──> فقط مدیریت: apply / enable / disable / 
 | ۲ | Schema سیاست و قواعد اولویت | ✅ تأیید شده |
 | ۳ | اسکلت Go، validator، compiler | ✅ تأیید شده |
 | ۴ | ENABLE / DISABLE / STATUS، apply/rollback اتمیک، نصب | ✅ تأیید شده |
-| ۵ | قوانین هویت و scope (user/group/namespace/project/ref)، استثناها، explain | ✅ **انجام شده (منتظر تأیید)** |
-| ۶ | پیمایش ضد-دور‌زدن (همه‌ی commitهای جدید) | ⏳ |
+| ۵ | قوانین هویت و scope (user/group/namespace/project/ref)، استثناها، explain | ✅ تأیید شده |
+| ۶ | پیمایش ضد-دور‌زدن (همه‌ی commitهای جدید)، محدودیت‌ها، timeout | ✅ **انجام شده (منتظر تأیید)** |
 | ۷ | پسوند و مسیر فایل (DLL, EXE, ...) | ⏳ |
 | ۸ | حجم blob و امضای PE | ⏳ |
 | ۹ به بعد | Audit کامل، cache گروه‌ها، Jenkins، تست، امنیت، کارایی، مستندات | ⏳ |
@@ -65,6 +65,9 @@ Jenkins (Control Plane) ──> فقط مدیریت: apply / enable / disable / 
 ├── internal/
 │   ├── policy/              خواندن سخت‌گیرانه‌ی YAML، validator (کدهای V/W)، compiler
 │   ├── hook/                منطق زمان push (pre-receive)
+│   ├── engine/              تصمیم هویت، استثناها، قوانین محتوایی مؤثر، کلاس سیاست
+│   ├── membership/          cache محلی عضویت گروه‌ها
+│   ├── gitscan/             پیمایش ضد-دور‌زدن (فقط git plumbing)
 │   ├── store/               نسخه‌های سیاست، ACTIVE/PREVIOUS، apply/rollback اتمیک
 │   ├── state/               سوییچ روشن/خاموش موتور
 │   ├── audit/               لاگ ممیزی JSON Lines
@@ -85,7 +88,7 @@ Jenkins (Control Plane) ──> فقط مدیریت: apply / enable / disable / 
 
 ## ۴. ساخت (Build) و تست
 
-نیازی به نصب Go ندارید؛ همه‌چیز داخل کانتینر `golang:1.24-alpine` اجرا می‌شود.
+نیازی به نصب Go ندارید؛ همه‌چیز داخل کانتینر (`golang:1.24-alpine` به‌علاوه‌ی git) اجرا می‌شود.
 
 ```bash
 cd ~/infra/git-policy
@@ -96,13 +99,17 @@ tools/build.sh all       # هر دو
 
 tests/integration/phase4.sh   # ۳۷ تست: نصب، روشن/خاموش، apply/rollback، fail-closed
 tests/integration/phase5.sh   # ۴۰ تست: قوانین کاربر/گروه/استثنا با git push واقعی
+tests/integration/phase6.sh   # ۲۳ تست: پیمایش ضد-دور‌زدن داخل quarantine گیت، محدودیت‌ها، کارایی
 ```
 
 خروجی مورد انتظار:
 ```
 RESULT: 37 passed, 0 failed     (phase4)
 RESULT: 40 passed, 0 failed     (phase5)
+RESULT: 23 passed, 0 failed     (phase6)
 ```
+
+اولین اجرای `tools/build.sh` یک image کوچک به نام `git-policy-build:go1.24` (Go + git) می‌سازد (فقط یک بار، نیاز به اینترنت).
 
 باینری خروجی **static** است (حدود ۳ مگابایت) و روی هر لینوکس amd64 بدون هیچ وابستگی اجرا می‌شود.
 
@@ -594,7 +601,94 @@ docker exec gitlab sh -c 'grep REJECT /var/opt/gitlab/git-policy/logs/audit-*.js
 
 ---
 
-## ۱۴. واژه‌نامه
+## ۱۴. فاز ۶: پیمایش ضد-دور‌زدن
+
+### ۱۴.۱ مسئله
+
+اگر فقط **آخرین commit** یا **وضعیت نهایی فایل‌ها** بررسی شود، این ترفندها از سیاست عبور می‌کنند:
+
+| ترفند | چرا خطرناک است |
+|---|---|
+| commit A فایل DLL را اضافه، commit B آن را حذف می‌کند؛ هر دو با هم push می‌شوند | DLL برای همیشه در تاریخچه‌ی Git می‌ماند |
+| یک فایل موجود (`readme.txt`) به `evil.dll` تغییر نام می‌دهد | blob جدیدی ساخته نمی‌شود |
+| DLL در fork اضافه می‌شود و با Merge Request وارد پروژه‌ی اصلی می‌شود | GitLab `refs/merge-requests/*` را **بدون اجرای hook** می‌نویسد |
+| تاریخچه‌ی `develop` (با قوانین سبک‌تر) به یک شاخه‌ی `release/*` (با قوانین سخت‌تر) push می‌شود | هیچ commit «جدیدی» برای repository وجود ندارد |
+| یک tag مستقیماً به tree یا blob اشاره می‌کند | commit ندارد |
+
+### ۱۴.۲ راه‌حل
+
+```
+برای هر ref در push:
+  ۱. نوع شیء جدید:  commit | tag → commit | tag → tree | tag → blob       (git cat-file --batch-check)
+  ۲. «قبلاً بررسی‌شده» = نوک شاخه‌ها و تگ‌های موجود (refs/heads و refs/tags)
+       فقط آن‌هایی که «کلاس سیاست» برابر یا سخت‌گیرانه‌تر دارند
+       (هرگز refs/merge-requests، keep-around و refهای داخلی GitLab)
+  ۳. commitهای جدید = قابل رسیدن از نوک جدید، و نه از «قبلاً بررسی‌شده»   (git rev-list --stdin)
+  ۴. برای **هر** commit جدید: مسیرهای اضافه/تغییر یافته                     (git diff-tree --stdin -c -z)
+       - merge: فقط چیزی که خود merge اضافه کرده (بقیه در commitهای والد دیده می‌شوند)
+       - rename = حذف + اضافه → نام جدید دیده می‌شود
+       - submodule (gitlink) محتوا نیست و نادیده گرفته می‌شود
+  ۵. tag → tree: همه‌ی مسیرهای tree؛  tag → blob: خود blob
+```
+
+- **حذف شاخه یا تگ** چیزی اضافه نمی‌کند. فقط قوانین هویتی (فاز ۵) روی آن اعمال می‌شوند.
+- **force push**: فقط commitهای بازنویسی‌شده‌ی جدید بررسی می‌شوند.
+- **شاخه‌ی جدید روی commitهای موجود**: هیچ پیمایشی لازم نیست (۳ میلی‌ثانیه).
+- اولین `release/*` روی یک پروژه با قوانین سخت‌تر، تاریخچه‌ای را که هرگز با قوانین release بررسی نشده **دوباره بررسی می‌کند**. این عمدی است (تصمیم Q4).
+
+### ۱۴.۳ Quarantine گیت
+
+در pre-receive، شیءهای push‌شده هنوز در یک پوشه‌ی موقت (quarantine) هستند. git-policy متغیرهای `GIT_OBJECT_DIRECTORY`، `GIT_ALTERNATE_OBJECT_DIRECTORIES` و `GIT_QUARANTINE_PATH` را **دست نمی‌زند**؛ همه‌ی دستورات git آن‌ها را به ارث می‌برند. این موضوع در تست با push واقعی بررسی شد.
+
+### ۱۴.۴ محدودیت‌ها و timeout
+
+| تنظیم (`settings.limits`) | پیش‌فرض | اگر رد شود | قابل استثنا |
+|---|---|---|---|
+| `max_ref_updates` | 1000 | `LIMIT_REF_UPDATES` | ✅ |
+| `max_new_commits` | 50000 | `LIMIT_COMMITS` | ✅ (مثلاً کاربر مهاجرت تاریخچه) |
+| `max_new_blobs` | 500000 | `LIMIT_OBJECTS` | ✅ |
+| `evaluation_timeout` | 45s | `EVAL_TIMEOUT` | ❌ |
+
+همه‌ی این موارد **fail-closed** هستند: pushی که بررسی نشده، دور زدن سیاست است.
+
+```yaml
+exceptions:
+  - id: EXC-IMPORT
+    rules: [LIMIT_COMMITS]
+    subjects: {users: [svc-import]}
+    reason: import legacy history
+    expires: 2026-10-31
+```
+
+### ۱۴.۵ کارایی
+
+| سناریو | زمان اندازه‌گیری‌شده |
+|---|---|
+| repository با ۲۰٬۰۰۰ commit، push یک commit | ۵ میلی‌ثانیه |
+| شاخه‌ی جدید روی همان repository | ۳ میلی‌ثانیه |
+
+- تعداد پروسه‌های git در هر push **ثابت** است (cat-file، for-each-ref، یک rev-list برای هر ref، یک diff-tree) و به تعداد commitها بستگی ندارد.
+- هزینه با تعداد **commitهای جدید** رشد می‌کند، نه با اندازه‌ی کل تاریخچه.
+- اگر هیچ قانون محتوایی روی refهای push‌شده اعمال نشود، پیمایش **کلاً انجام نمی‌شود**.
+
+### ۱۴.۶ دستور scan (عیب‌یابی)
+
+نشان می‌دهد یک push دقیقاً چه چیزهایی را وارد repository می‌کند:
+
+```bash
+cd /path/to/repo.git
+echo "<old-sha> <new-sha> refs/heads/main" | git-policy scan --policy policy.yaml --project finance/app
+```
+```
+commits=2 blobs=1 entries=1 exclusion-tips=1 duration=4ms
+  refs/heads/main                55e85808ff46 100644 "Lib/Mic.Caching.dll"
+```
+
+> در فاز ۶ این مسیرها **فقط پیدا می‌شوند**. فاز ۷ آن‌ها را با `blocked_extensions` و `blocked_paths` مقایسه می‌کند، و فاز ۸ حجم و امضای PE را بررسی می‌کند.
+
+---
+
+## ۱۵. واژه‌نامه
 
 | واژه | معنی |
 |---|---|
@@ -610,3 +704,5 @@ docker exec gitlab sh -c 'grep REJECT /var/opt/gitlab/git-policy/logs/audit-*.js
 | **Audit log** | لاگ ساختاریافته (JSON Lines) از همه‌ی رویدادهای امنیتی و مدیریتی |
 | **Membership cache** | فایل محلی عضویت کاربران در گروه‌های GitLab؛ push هرگز منتظر GitLab API نمی‌ماند |
 | **explain** | شبیه‌سازی تصمیم policy برای یک push فرضی، بدون push واقعی |
+| **Quarantine** | پوشه‌ی موقتی که Git شیءهای push‌شده را تا پایان pre-receive در آن نگه می‌دارد |
+| **کلاس سیاست** | مجموعه‌ی refهایی که قوانین محتوایی یکسان دارند؛ برای تعیین «قبلاً بررسی‌شده» استفاده می‌شود |
