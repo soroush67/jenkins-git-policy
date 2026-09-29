@@ -49,12 +49,17 @@ func NewContext(root, hookPath, actor string) (*Context, error) {
 	}
 	if os.Geteuid() == 0 {
 		uid, gid, err := lookupGit()
-		if err != nil {
+		switch {
+		case err == nil:
+			c.RootOwn = &fsutil.Owner{UID: 0, GID: 0}
+			c.RootGit = &fsutil.Owner{UID: 0, GID: gid}
+			c.GitOwn = &fsutil.Owner{UID: uid, GID: gid}
+		case l.Root == layout.DefaultRoot:
 			return nil, fmt.Errorf("git account not found (is this the GitLab container?): %w", err)
+		default:
+			// Custom root without a git account (tests or CI running as root):
+			// behave like an unprivileged install and leave ownership alone.
 		}
-		c.RootOwn = &fsutil.Owner{UID: 0, GID: 0}
-		c.RootGit = &fsutil.Owner{UID: 0, GID: gid}
-		c.GitOwn = &fsutil.Owner{UID: uid, GID: gid}
 	} else if l.Root == layout.DefaultRoot {
 		return nil, errors.New("admin commands on the production root must run as root (docker exec -u root gitlab ...)")
 	}
