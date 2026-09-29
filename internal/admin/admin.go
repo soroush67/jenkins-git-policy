@@ -10,6 +10,7 @@ import (
 	"os/user"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/soroush67/git-policy/internal/audit"
@@ -267,4 +268,83 @@ func (c *Context) PruneLogs(retentionDays int) ([]string, error) {
 	removed, err := audit.Prune(c.L.LogsDir(), retentionDays, c.Now())
 	c.audit(audit.LogsPruned, map[string]any{"retention_days": retentionDays, "removed": removed})
 	return removed, err
+}
+
+// Membership safety guard: refuse a sync result that looks like an outage
+// or permission change rather than real membership changes.
+const (
+	membershipDropRatio = 0.30 // refuse losing more than 30% of memberships...
+	membershipDropMin   = 10   // ...when the current cache has at least this many
+	membershipMaxSkew   = 5 * time.Minute
+)
+
+// MembershipResult summarises apply-membership.
+type MembershipResult struct {
+	Groups, Users, Pairs, PreviousPairs int
+	Forced                              bool
+}
+
+// ApplyMembership installs a new membership cache atomically, keeping the
+// current one as previous.json. force overrides the safety guard.
+func (c *Context) ApplyMembership(data []byte, force bool) (*MembershipResult, error) {
+	f, err := membership.Parse(data)
+	if err != nil {
+		return nil, fmt.Errorf("membership file: %w", err)
+	}
+	now := c.Now()
+	if f.GeneratedAt.After(now.Add(membershipMaxSkew)) {
+		return nil, fmt.Errorf("generated_at %s is in the future (clock skew?)", f.GeneratedAt.Format(time.RFC3339))
+	}
+	unlock, err := c.lock()
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
+
+	res := &MembershipResult{Groups: len(f.Groups), Users: len(f.Users), Pairs: f.Pairs(), Forced: force}
+	var problems []string
+	if act, err := store.LoadActive(c.L); err == nil {
+		hard := time.Duration(act.Policy.Settings.Membership.HardMaxAgeSeconds) * time.Second
+		if now.Sub(f.GeneratedAt) > hard {
+			problems = append(problems, fmt.Sprintf("data is older than hard_max_age (%s)", hard))
+		}
+		for _, g := range policy.ReferencedGroups(act.Policy) {
+			if !contains(f.Groups, g) {
+				problems = append(problems, fmt.Sprintf("group %q used by the active policy is missing from the file", g))
+			}
+		}
+	}
+	cur, err := os.ReadFile(membership.CurrentPath(c.L))
+	if err == nil {
+		if old, err := membership.Parse(cur); err == nil {
+			res.PreviousPairs = old.Pairs()
+			if res.PreviousPairs >= membershipDropMin && float64(res.Pairs) < float64(res.PreviousPairs)*(1-membershipDropRatio) {
+				problems = append(problems, fmt.Sprintf("memberships dropped from %d to %d (more than %d%%)", res.PreviousPairs, res.Pairs, int(membershipDropRatio*100)))
+			}
+		}
+	}
+	if len(problems) > 0 && !force {
+		c.audit(audit.MembershipRefused, map[string]any{"problems": problems, "pairs": res.Pairs, "previous_pairs": res.PreviousPairs})
+		return res, fmt.Errorf("refusing membership update: %s (re-run with --force after checking GitLab)", strings.Join(problems, "; "))
+	}
+	if cur != nil {
+		if err := fsutil.WriteFileAtomic(membership.PreviousPath(c.L), cur, 0o640, c.RootGit); err != nil {
+			return res, err
+		}
+	}
+	if err := fsutil.WriteFileAtomic(membership.CurrentPath(c.L), data, 0o640, c.RootGit); err != nil {
+		return res, err
+	}
+	c.audit(audit.MembershipSync, map[string]any{"groups": res.Groups, "users": res.Users, "pairs": res.Pairs,
+		"previous_pairs": res.PreviousPairs, "forced": force, "generated_at": f.GeneratedAt.Format(time.RFC3339), "problems": problems})
+	return res, nil
+}
+
+func contains(list []string, s string) bool {
+	for _, x := range list {
+		if x == s {
+			return true
+		}
+	}
+	return false
 }

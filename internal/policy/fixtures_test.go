@@ -151,3 +151,39 @@ func dump(fs []Finding) string {
 	}
 	return b.String()
 }
+
+func TestInventoryWarningsAndReferencedGroups(t *testing.T) {
+	src := `apiVersion: git-policy/v1
+kind: GitPolicy
+metadata: {name: t, revision: 1}
+mandatory: {deny_users: ["@unknown", ghost], deny_groups: [offboarding]}
+namespaces: {finance: {max_file_size: 1MiB}, alex: {max_file_size: 1MiB}}
+projects: {finance/app: {max_file_size: 1MiB}, finance/typo: {max_file_size: 1MiB}}
+users:
+  alex: {projects: {finance/app: {push: deny}}}
+  alx: {push: deny}
+groups:
+  contractors: {push: deny}
+exceptions:
+  - {id: EXC-1, rules: [FILE_TOO_LARGE], subjects: {groups: [data-science]}, reason: models for the team, expires: 2026-10-10}
+`
+	inv := NewInventory([]string{"alex", "bob"}, []string{"finance", "contractors", "offboarding"}, []string{"finance/app"})
+	doc, fs := Parse([]byte(src))
+	if doc == nil {
+		t.Fatal(fs)
+	}
+	var got []string
+	for _, f := range Validate(doc, Options{Now: testNow, Inventory: inv}) {
+		if f.Code == "W010" {
+			got = append(got, f.Path)
+		}
+	}
+	want := `users.alx,mandatory.deny_users[1],projects["finance/typo"],exceptions[0].subjects.groups[0]`
+	if strings.Join(got, ",") != want {
+		t.Fatalf("W010 paths:\n got %s\nwant %s", strings.Join(got, ","), want)
+	}
+	c, _ := Build([]byte(src), Options{Now: testNow})
+	if g := strings.Join(ReferencedGroups(c), ","); g != "contractors,data-science,offboarding" {
+		t.Fatalf("referenced groups: %s", g)
+	}
+}

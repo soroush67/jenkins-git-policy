@@ -28,11 +28,14 @@ const usage = `git-policy — server-side Git policy engine for GitLab
 
 Usage:
   git-policy version  [--json]
-  git-policy validate [--json] [--now YYYY-MM-DD] <policy.yaml | ->
+  git-policy validate [--json] [--now YYYY-MM-DD] [--inventory FILE] <policy.yaml | ->
   git-policy compile  [--now YYYY-MM-DD] [-o compiled.json] <policy.yaml | ->
   git-policy status   [--json] [--root DIR] [--hook-path FILE]
   git-policy explain  --project PATH [--user NAME] [--groups a,b] [--ref REF] [--policy FILE] [--json]
   git-policy scan     [--policy FILE] [--project PATH] [--repo DIR] [--json] < ref-updates   (diagnostics)
+  git-policy groups   [--policy FILE] [--root DIR]  groups the policy depends on
+  git-policy sync-membership --gitlab-url URL (--policy FILE | --groups LIST) [-o FILE]
+                      [--inventory-out FILE] [--token-file F | $GITLAB_TOKEN] [--ca-file F] [--insecure]
   git-policy hook     [--root DIR]                 (run by the pre-receive wrapper)
 
   git-policy admin install   [--replace-hook]        install binary, layout, hook wrapper
@@ -44,6 +47,7 @@ Usage:
   git-policy admin rollback  --reason TEXT [--to VERSION]
   git-policy admin versions
   git-policy admin prune-logs [--days N]             delete audit files older than retention_days
+  git-policy admin apply-membership [--force] <membership.json | ->   install the group-membership cache
     common admin flags: [--root DIR] [--hook-path FILE] [--actor NAME]
 
 Exit codes: 0 ok, 1 invalid/rejected/refused, 2 usage or I/O error.
@@ -74,6 +78,10 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return cmdExplain(args[1:], stdout, stderr)
 	case "scan":
 		return cmdScan(args[1:], stdin, stdout, stderr)
+	case "groups":
+		return cmdGroups(args[1:], stdout, stderr)
+	case "sync-membership":
+		return cmdSyncMembership(args[1:], stdout, stderr)
 	case "admin":
 		return cmdAdmin(args[1:], stdin, stdout, stderr)
 	case "help", "-h", "--help":
@@ -118,6 +126,7 @@ func cmdValidate(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	fs.SetOutput(stderr)
 	asJSON := fs.Bool("json", false, "machine-readable output")
 	now := fs.String("now", "", "reference date for exception expiry (YYYY-MM-DD, default today)")
+	invFile := fs.String("inventory", "", "GitLab inventory (sync-membership --inventory-out) for W010 warnings")
 	if err := fs.Parse(args); err != nil || fs.NArg() != 1 {
 		fmt.Fprint(stderr, usage)
 		return exitUsage
@@ -126,6 +135,12 @@ func cmdValidate(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if err != nil {
 		fmt.Fprintf(stderr, "git-policy: %v\n", err)
 		return exitUsage
+	}
+	if *invFile != "" {
+		if opts.Inventory, err = loadInventory(*invFile); err != nil {
+			fmt.Fprintf(stderr, "git-policy: %v\n", err)
+			return exitUsage
+		}
 	}
 	file := fs.Arg(0)
 	src, err := readPolicy(file, stdin)

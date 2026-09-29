@@ -13,6 +13,7 @@ import (
 	"github.com/soroush67/git-policy/internal/admin"
 	"github.com/soroush67/git-policy/internal/hook"
 	"github.com/soroush67/git-policy/internal/layout"
+	"github.com/soroush67/git-policy/internal/membership"
 	"github.com/soroush67/git-policy/internal/policy"
 	"github.com/soroush67/git-policy/internal/store"
 )
@@ -129,7 +130,7 @@ func cmdAdmin(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	ttl := fs.String("ttl", "", "disable duration, e.g. 30m, 2h")
 	to := fs.String("to", "", "rollback target version, e.g. 000003 or 3")
 	replaceHook := fs.Bool("replace-hook", false, "install: back up and replace a different existing hook")
-	force := fs.Bool("force", false, "uninstall: remove a modified hook wrapper")
+	force := fs.Bool("force", false, "uninstall: remove a modified hook wrapper; apply-membership: override the safety guard")
 	name := fs.String("name", "", "retire-hook: file name in pre-receive.d, e.g. 01-block-dll")
 	days := fs.Int("days", 0, "prune-logs: retention in days (default: settings.audit.retention_days)")
 	if err := fs.Parse(args[1:]); err != nil {
@@ -225,6 +226,25 @@ func cmdAdmin(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stdout, "rolled back: %s -> %s\n", versionOrDash(from), layout.VersionName(target))
 	case "versions":
 		return listVersions(ctx.L, stdout, stderr)
+	case "apply-membership":
+		if fs.NArg() != 1 {
+			return fail(errors.New("exactly one membership file (or -) is required"))
+		}
+		var data []byte
+		if fs.Arg(0) == "-" {
+			data, err = io.ReadAll(io.LimitReader(stdin, membership.MaxSize+1))
+		} else {
+			data, err = os.ReadFile(fs.Arg(0))
+		}
+		if err != nil {
+			return fail(err)
+		}
+		res, err := ctx.ApplyMembership(data, *force)
+		if err != nil {
+			return fail(err)
+		}
+		fmt.Fprintf(stdout, "membership cache updated: %d group(s), %d user(s), %d membership(s) (previously %d)%s\n",
+			res.Groups, res.Users, res.Pairs, res.PreviousPairs, yesNo(res.Forced, " [forced]", ""))
 	case "prune-logs":
 		removed, err := ctx.PruneLogs(*days)
 		if err != nil {

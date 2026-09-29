@@ -66,6 +66,7 @@ git-policy version --json
 |---|---|---|---|
 | `--json` | — | خاموش | خروجی JSON (برای Jenkins): `valid`، `errors`، `warnings`، `sha256`، `findings` |
 | `--now` | `YYYY-MM-DD` | امروز | تاریخ مرجع برای بررسی انقضای استثناها (برای تست یا پیش‌بینی) |
+| `--inventory` | فایل | — | inventory از `sync-membership --inventory-out`؛ فعال کردن هشدار **W010** برای کاربر، گروه یا پروژه‌ای که در GitLab نیست |
 
 <div dir="ltr">
 
@@ -192,6 +193,39 @@ echo "<old-sha> <new-sha> refs/heads/main" | git-policy scan --policy p.yaml --p
 ```
 
 </div>
+
+---
+
+### `git-policy groups [--policy FILE] [--root DIR]`
+
+گروه‌های GitLab را که policy از آن‌ها استفاده می‌کند چاپ می‌کند، هر کدام در یک خط: قوانین `groups`، `mandatory.deny_groups` و `subjects.groups` استثناها. همان چیزی است که sync باید بخواند.
+
+| گزینه | توضیح |
+|---|---|
+| `--policy` | فایل policy (پیش‌فرض: policy فعال سرور) |
+| `--root` | مسیر نصب برای خواندن policy فعال |
+
+---
+
+### `git-policy sync-membership` (روی agent جنکینز)
+
+عضویت گروه‌ها را از GitLab API می‌خواند و `membership.json` می‌سازد (و در صورت نیاز inventory). **token فقط از متغیر `GITLAB_TOKEN` یا فایل خوانده می‌شود و هرگز چاپ نمی‌شود.**
+
+| گزینه | مقدار | پیش‌فرض | توضیح |
+|---|---|---|---|
+| `--gitlab-url` | `https://gitlab.example.com` | **الزامی** | آدرس GitLab (بدون `/api/v4`) |
+| `--policy` | فایل | — | گروه‌ها از این policy خوانده شوند |
+| `--groups` | فهرست (جداشده با کاما، فاصله یا خط جدید) | — | یا گروه‌ها مستقیم (مثلاً خروجی `ctl groups`). یکی از این دو الزامی است |
+| `-o` | فایل | stdout | محل نوشتن membership.json |
+| `--inventory-out` | فایل | — | inventory کاربران، گروه‌ها و پروژه‌ها (برای W010) |
+| `--token-file` | فایل | `$GITLAB_TOKEN` | فایل حاوی token؛ فاصله و newline انتها حذف می‌شود |
+| `--ca-file` | فایل | — | CA اضافه برای TLS |
+| `--insecure` | — | خاموش | نادیده گرفتن TLS (**فقط lab**) |
+| `--timeout` | مدت | `30s` | timeout هر درخواست |
+
+- **رفتار در خطا:** گروه ناموجود، token نامعتبر (401/403) یا GitLab در دسترس نبودن → کد خروج ۱ و **هیچ فایلی** نوشته نمی‌شود.
+- پاسخ 429 یا 5xx تا ۵ بار با backoff و `Retry-After` دوباره امتحان می‌شود.
+- token باید دسترسی `read_api` داشته باشد. برای inventory کامل، token باید admin باشد.
 
 ---
 
@@ -338,6 +372,18 @@ git-policy admin apply --actor ali --reason "INFRA-123 block pdb in finance" /tm
 
 ---
 
+### `admin apply-membership [--force] <membership.json | ->`
+
+cache عضویت را به‌صورت اتمیک نصب می‌کند و نسخه‌ی فعلی را در `previous.json` نگه می‌دارد.
+
+| گزینه | توضیح |
+|---|---|
+| `--force` | عبور از محافظ‌ها (کاهش بیش از ۳۰٪، گروه جاافتاده، داده‌ی کهنه). فقط بعد از بررسی GitLab |
+
+همیشه رد می‌شود: فایل خراب، schema نادرست، و `generated_at` در آینده (حتی با `--force`). رویدادهای audit: `MEMBERSHIP_SYNC` یا `MEMBERSHIP_SYNC_REFUSED`.
+
+---
+
 ### `admin prune-logs [--days N]`
 
 فایل‌های audit قدیمی‌تر از مدت نگهداری را حذف می‌کند.
@@ -408,7 +454,8 @@ Jenkins هیچ دسترسی مستقیمی به docker یا shell سرور ند�
 | `rollback` | `--actor-b64 --reason-b64 [--to=N]` | — | `admin rollback` |
 | `enable` | `--actor-b64 --reason-b64` | — | `admin enable` |
 | `disable` | `--actor-b64 --reason-b64 --ttl=2h` | — | `admin disable` |
-| `apply-membership` | `--actor-b64` | JSON عضویت روی stdin | (فاز ۱۰) |
+| `groups` | — | فهرست گروه‌ها | `groups` |
+| `apply-membership` | `--actor-b64 [--force]` | JSON عضویت روی stdin | `admin apply-membership -` |
 | `retire-hook` | `--actor-b64 --name=FILE` | — | `admin retire-hook` |
 | `deploy` | `--actor-b64 --sha256=HEX` | باینری روی stdin | کپی به کانتینر، بررسی sha256 دو بار، سپس `admin install` |
 | `prune-logs` | `--actor-b64 [--days=N]` | — | `admin prune-logs` |
@@ -493,7 +540,11 @@ $SSH "logs --date=2026-09-29" > audit.jsonl
 | gp-ctl | فقط از داخل شبکه‌ی Docker | `gitpolicy-deploy` (کلید SSH) | `lab/ctl/jenkins_ctl_key` |
 
 - **Jenkins:** credentialهای `git-policy-ssh-test` (کلید SSH) و `gitlab-api-readonly` (token گیت‌لب) از قبل تعریف شده‌اند.
-- **Job آزمایشی `git-policy-status`** وضعیت را از مسیر Jenkins → gp-ctl → GitLab می‌خواند.
+- **Jobها:**
+  - `git-policy-status`: وضعیت از مسیر Jenkins → gp-ctl → GitLab.
+  - `git-policy-sync-membership`: همگام‌سازی گروه‌ها هر ۱۵ دقیقه، با پارامتر `FORCE`.
+  - pipeline کامل در فاز ۱۱.
+- pipelineها در `lab/jenkins/pipelines/*.groovy` هستند. باینری از `dist/` در `/opt/git-policy` داخل Jenkins mount می‌شود.
 - فایل‌های رمز در git **نیستند** (`.gitignore`).
 
 ---
@@ -508,7 +559,7 @@ $SSH "logs --date=2026-09-29" > audit.jsonl
 | `tools/build.sh all` | test + build |
 | `tests/integration/phase4.sh` … `phase8.sh` | تست با `git push` واقعی روی repo محلی (۳۷/۴۰/۲۳/۴۲/۲۲ مورد) |
 | `tests/examples/verify.sh ["" 01 02 …]` | همه‌ی ردیف‌های ۱۰ مثال `EXAMPLES-FA.md` (۶۶ push) |
-| `tests/gitlab/verify-gitlab.sh` | **همه‌ی فازها روی GitLab واقعی lab** (۷۲ بررسی): HTTP، SSH، Web، fork+MR، wiki، deploy key، کانال Jenkins |
+| `tests/gitlab/verify-gitlab.sh` | **همه‌ی فازها روی GitLab واقعی lab** (۸۵ بررسی): HTTP، SSH، Web، fork+MR، wiki، deploy key، کانال و jobهای Jenkins، sync گروه‌ها، TEST 17/18 |
 | `tools/dev/check_schema.py` | بررسی JSON Schema با فایل‌های نمونه |
 | `tools/dev/rtl.py FILE…` | راست‌چین کردن اسناد فارسی (کد بلاک‌ها چپ‌چین) |
 

@@ -37,6 +37,8 @@ const (
 	PushRejected        = "REJECT"
 	PushAccepted        = "ACCEPT"
 	LogsPruned          = "LOGS_PRUNED"
+	MembershipSync      = "MEMBERSHIP_SYNC"
+	MembershipRefused   = "MEMBERSHIP_SYNC_REFUSED"
 	ExceptionApplied    = "EXCEPTION_APPLIED"
 	WouldReject         = "WOULD_REJECT"
 	FindingsTruncated   = "FINDINGS_TRUNCATED"

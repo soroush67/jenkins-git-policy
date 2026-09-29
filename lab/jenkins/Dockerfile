@@ -7,3 +7,4 @@ USER jenkins
 COPY plugins.txt /usr/share/jenkins/ref/plugins.txt
 RUN jenkins-plugin-cli --plugin-file /usr/share/jenkins/ref/plugins.txt
 COPY casc.yaml /usr/share/jenkins/ref/casc.yaml
+COPY pipelines/ /usr/share/jenkins/ref/pipelines/

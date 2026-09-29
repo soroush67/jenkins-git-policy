@@ -11,6 +11,8 @@ import (
 type Options struct {
 	// Now is the reference time for exception expiry checks; zero means time.Now().
 	Now time.Time
+	// Inventory, when set, enables W010 (names unknown to GitLab).
+	Inventory *Inventory
 }
 
 // Validate runs the semantic checks of PHASE-2-SCHEMA.md §5 on a parsed
@@ -27,6 +29,9 @@ func Validate(doc *Document, opts Options) []Finding {
 	v.content()
 	v.identities()
 	v.exceptions()
+	if opts.Inventory != nil {
+		v.inventoryWarnings(opts.Inventory)
+	}
 	return v.out
 }
 

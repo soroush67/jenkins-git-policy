@@ -71,6 +71,23 @@ policy() {
         "$ROOT_DIR/tests/gitlab/policy.tmpl.yaml" > "$WORK/policy.yaml"
     ctl "apply --actor-b64=$(b64 jenkins#verify) --reason-b64=$(b64 "lab verify rev $REV")" < "$WORK/policy.yaml"
 }
+JPW=$(grep '^JENKINS_ADMIN_PASSWORD=' "$ROOT_DIR/lab/.env" | cut -d= -f2-)
+# jenkins_build <job> [name=value ...] -> prints "RESULT build#" ; console in $WORK/console
+jenkins_build() {
+    local job=$1; shift
+    local j=(-s -u "admin:$JPW") cookie="$WORK/jcookie" crumb loc q n r i
+    crumb=$(curl "${j[@]}" -c "$cookie" http://localhost:8081/crumbIssuer/api/json | jq -r '.crumbRequestField+":"+.crumb')
+    local data=(); for kv in "$@"; do data+=(--data-urlencode "$kv"); done
+    loc=$(curl "${j[@]}" -b "$cookie" -H "$crumb" -X POST -D - -o /dev/null "http://localhost:8081/job/$job/buildWithParameters" "${data[@]}" | tr -d '\r' | awk 'tolower($1)=="location:"{print $2}')
+    if [ -z "$loc" ]; then  # first run: parameters not registered yet
+        loc=$(curl "${j[@]}" -b "$cookie" -H "$crumb" -X POST -D - -o /dev/null "http://localhost:8081/job/$job/build" | tr -d '\r' | awk 'tolower($1)=="location:"{print $2}')
+    fi
+    for i in $(seq 1 60); do n=$(curl "${j[@]}" "${loc}api/json" | jq -r '.executable.number // empty'); [ -n "$n" ] && break; sleep 2; done
+    for i in $(seq 1 120); do r=$(curl "${j[@]}" "http://localhost:8081/job/$job/$n/api/json" | jq -r '.result // empty'); [ -n "$r" ] && break; sleep 2; done
+    curl "${j[@]}" "http://localhost:8081/job/$job/$n/consoleText" > "$WORK/console"
+    echo "$r $n"
+}
+
 membership() { # membership <json-users-object>
     printf '{"schema":"git-policy/membership/v1","generated_at":"%s","generator":"verify-gitlab","groups":["contractors-%s"],"users":%s}\n' \
         "$(date -u +%FT%TZ)" "$S" "$1" | docker exec -i -u root gitlab sh -c \
@@ -134,7 +151,10 @@ refused "path traversal in --name refused" "invalid --name" "retire-hook --actor
 docker exec gp-jenkins ssh -q -i /run/secrets/git-policy-ssh-key -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
     -o BatchMode=yes -t gitpolicy-deploy@gp-ctl 'docker ps' >/dev/null 2>&1 && ko "docker must not be reachable via ssh" || ok "'docker ps' over ssh refused (forced command)"
 out=$(policy 2>&1) && ok "policy applied via ctl (stdin)" || ko "ctl apply" "$out"
-membership "{\"carol\":{\"state\":\"active\",\"groups\":[\"contractors-$S\"]}}"
+read -r res num <<<"$(jenkins_build git-policy-sync-membership)"
+[ "$res" = SUCCESS ] && grep -q "membership cache updated: 1 group(s)" "$WORK/console" && ok "Phase 10: Jenkins job git-policy-sync-membership #$num synced from the GitLab API" \
+    || ko "Jenkins sync job ($res)" "$(tail -20 "$WORK/console")"
+grep -q "$(cat "$ROOT_DIR/lab/.gitlab-token")" "$WORK/console" && ko "API token leaked into the Jenkins console!" || ok "API token not in the Jenkins console"
 out=$(ctl "enable --actor-b64=$(b64 jenkins#verify) --reason-b64=$(b64 'lab verify')" 2>&1) && ok "enabled via ctl" || ko "ctl enable" "$out"
 
 echo "== Phase 5: identity rules with real GitLab users (HTTP, SSH, Web)"
@@ -221,6 +241,34 @@ if push "$WORK/app-dev" "ssh://git@localhost:2222/$F/app.git" deploy-test; then 
 unset GIT_SSH_COMMAND
 ev=$(audit_tail 10 | grep 'deploy-test' | tail -1)
 info "deploy key context: $(jq -c '{user,gl_id,protocol}' <<<"$ev" 2>/dev/null)"
+
+echo "== Phase 10: membership follows GitLab; guards; TEST 17/18"
+st=$(ctl status --json); jq -e '.membership | startswith("fresh")' <<<"$st" >/dev/null && ok "status: membership $(jq -r .membership <<<"$st" | cut -c1-40)" || ko "membership status" "$st"
+api DELETE "/groups/$CON/members/${UID_OF[carol]}" >/dev/null
+read -r res num <<<"$(jenkins_build git-policy-sync-membership)"; [ "$res" = SUCCESS ] && ok "carol removed from contractors in GitLab; sync #$num" || ko "sync after removal" "$(tail -10 "$WORK/console")"
+sync "$WORK/app-carol"; add "$WORK/app-carol" src/c2.cs
+expect_push accept "carol (no longer a contractor) -> finance accepted" "$WORK/app-carol" origin main
+for i in $(seq 1 12); do user "gpbulk$i"; member "$CON" "gpbulk$i" 30; done
+read -r res num <<<"$(jenkins_build git-policy-sync-membership)"; [ "$res" = SUCCESS ] && ok "12 bulk members synced (#$num)" || ko "bulk sync" "$(tail -10 "$WORK/console")"
+for i in $(seq 1 6); do api DELETE "/groups/$CON/members/${UID_OF[gpbulk$i]}" >/dev/null; done
+read -r res num <<<"$(jenkins_build git-policy-sync-membership)"
+[ "$res" = FAILURE ] && grep -qE "memberships dropped from [0-9]+ to [0-9]+" "$WORK/console" && ok "guard: ~50% drop refused by the server (#$num FAILURE): $(grep -oE "dropped from [0-9]+ to [0-9]+" "$WORK/console" | head -1)" || ko "drop guard ($res)" "$(tail -10 "$WORK/console")"
+read -r res num <<<"$(jenkins_build git-policy-sync-membership FORCE=true)"
+[ "$res" = SUCCESS ] && grep -q "\[forced\]" "$WORK/console" && ok "FORCE=true applies it (#$num), audited as forced" || ko "forced sync ($res)" "$(tail -10 "$WORK/console")"
+before=$(ctl status --json | jq -r .membership)
+out=$("$BIN" sync-membership --gitlab-url http://127.0.0.1:9 --groups "contractors-$S" --timeout 2s -o "$WORK/m.json" 2>&1 <<<"" ) && ko "sync against an unreachable GitLab must fail" || ok "TEST 18: GitLab API down -> sync fails, nothing written"
+[ ! -s "$WORK/m.json" ] && ok "no partial membership file produced" || ko "partial file written"
+after=$(ctl status --json | jq -r .membership); [ "${before%%,*}" = "${after%%,*}" ] && ok "TEST 18: cache on the server unchanged; group rules keep working from it" || ko "cache changed" "$before / $after"
+sync "$WORK/app-carol"; add "$WORK/app-carol" src/c3.cs; clone dave "$F/app" "$WORK/app-dave" 2>/dev/null || true
+docker stop gp-jenkins >/dev/null
+sync "$WORK/pay-alex"; add "$WORK/pay-alex" src/j.cs
+expect_push USER_PUSH_DENIED "TEST 17: Jenkins stopped -> enforcement continues (alex still rejected)" "$WORK/pay-alex" origin main
+docker start gp-jenkins >/dev/null; until curl -fsS -o /dev/null http://localhost:8081/login 2>/dev/null; do sleep 3; done; sleep 5
+GITLAB_TOKEN=$TOKEN "$BIN" sync-membership --gitlab-url "$GL" --groups "contractors-$S" -o /dev/null --inventory-out "$WORK/inventory.json" 2>/dev/null
+sed -e 's/  alex:/  alexx:/' "$WORK/policy.yaml" > "$WORK/typo.yaml"
+out=$("$BIN" validate --inventory "$WORK/inventory.json" "$WORK/typo.yaml")
+grep -q 'W010  users.alexx: user "alexx" does not exist in GitLab' <<<"$out" && ok "W010: typo 'alexx' flagged using the real GitLab inventory" || ko "W010" "$out"
+grep -q 'W010' <<<"$("$BIN" validate --inventory "$WORK/inventory.json" "$WORK/policy.yaml")" && ko "correct policy must have no W010" || ok "correct policy: no W010"
 
 echo "== Phase 4: fail-closed, break-glass, rollback (real GitLab)"
 docker exec -u root gitlab sh -c 'cp /var/opt/gitlab/git-policy/state/engine.json /tmp/s.bak && echo "{bad" > /var/opt/gitlab/git-policy/state/engine.json'

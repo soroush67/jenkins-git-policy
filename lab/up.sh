@@ -31,7 +31,7 @@ if [ "$(cat .gitlab-token)" = pending ]; then
       u = User.find_by_username('root')
       t = u.personal_access_tokens.create!(name: 'git-policy-lab', scopes: [:api, :read_api, :sudo, :admin_mode], expires_at: 300.days.from_now)
       t.set_token('$tok'); t.save!" >/dev/null
-    printf '%s\n' "$tok" > .gitlab-token && chmod 0600 .gitlab-token
+    printf '%s' "$tok" > .gitlab-token && chmod 0600 .gitlab-token
 fi
 
 echo "==> starting gp-ctl and Jenkins"

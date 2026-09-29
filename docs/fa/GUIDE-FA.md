@@ -3,7 +3,7 @@
 # راهنمای فارسی git-policy
 
 > نسخه نرم‌افزار: **v0.1.0** — نسخه schema سیاست: **`git-policy/v1`**
-> وضعیت: فازهای ۱ تا ۹ انجام شده و **همه روی GitLab واقعی (17.10.5) تست شده‌اند** (۷۲ از ۷۲). همه‌ی قوانین enforcement فعال‌اند و روی **همه‌ی commitهای جدید** هر push اجرا می‌شوند. audit log کامل است.
+> وضعیت: فازهای ۱ تا ۱۰ انجام شده و **همه روی GitLab واقعی (17.10.5) تست شده‌اند** (۸۵ از ۸۵). همه‌ی قوانین enforcement فعال‌اند و روی **همه‌ی commitهای جدید** هر push اجرا می‌شوند. audit log کامل است.
 >
 > 📘 **راهنمای کامل همه‌ی دستورات و گزینه‌ها:** [CLI-FA.md](CLI-FA.md)  — 📗 **۱۰ مثال:** [EXAMPLES-FA.md](EXAMPLES-FA.md)
 >
@@ -59,9 +59,10 @@ Jenkins (Control Plane) ──> فقط مدیریت: apply / enable / disable / 
 | ۶ | پیمایش ضد-دور‌زدن (همه‌ی commitهای جدید)، محدودیت‌ها، timeout | ✅ تأیید شده |
 | ۷ | پسوند و مسیر فایل (DLL, EXE, ...)، حالت audit، بازنشسته کردن PoC | ✅ تأیید شده |
 | ۸ | حجم blob و امضای PE | ✅ تأیید شده |
-| ۹ | audit کامل: `log_accepted`، `required`، retention، فیلدهای SIEM | ✅ **انجام شده (منتظر تأیید)** |
-| lab | GitLab 17.10.5 + Jenkins + gp-ctl با docker-compose؛ تست همه‌ی فازها روی GitLab واقعی | ✅ **۷۲ از ۷۲** |
-| ۱۰ به بعد | همگام‌سازی گروه‌ها، pipeline کامل Jenkins، تست، امنیت، کارایی، مستندات | ⏳ |
+| ۹ | audit کامل: `log_accepted`، `required`، retention، فیلدهای SIEM | ✅ تأیید شده |
+| ۱۰ | همگام‌سازی عضویت گروه‌ها از GitLab با Jenkins، محافظ ایمنی، هشدار W010 | ✅ **انجام شده (منتظر تأیید)** |
+| lab | GitLab 17.10.5 + Jenkins + gp-ctl با docker-compose؛ تست همه‌ی فازها روی GitLab واقعی | ✅ **۸۵ از ۸۵** |
+| ۱۱ به بعد | pipeline کامل Jenkins، تست، امنیت، کارایی، مستندات | ⏳ |
 
 > ✅ از فاز ۷ به بعد **git-policy خودش DLL/EXE و مسیرهای ممنوع را رد می‌کند.** PoC قدیمی (`01-block-dll`) تا زمانی که شما روی lab تأیید کنید دست‌نخورده می‌ماند و بعد با `admin retire-hook` بازنشسته می‌شود (بخش ۱۵.۵).
 
@@ -1148,7 +1149,7 @@ source = ". = parse_json!(.message)"
 cd ~/infra/git-policy
 tools/build.sh all
 lab/up.sh                           # GitLab CE 17.10.5 + Jenkins + gp-ctl
-tests/gitlab/verify-gitlab.sh       # all phases on the real GitLab -> RESULT: 72 passed, 0 failed
+tests/gitlab/verify-gitlab.sh       # all phases on the real GitLab -> RESULT: 85 passed, 0 failed
 lab/down.sh                         # stop (data kept);  lab/down.sh --purge  deletes everything
 ```
 
@@ -1175,20 +1176,88 @@ lab/down.sh                         # stop (data kept);  lab/down.sh --purge  de
 | `ACCEPT`، `audit.required`، `prune-logs`، `logs`، `backup` | ✅ |
 | بازنشسته کردن PoC | ✅ |
 | کانال Jenkins → gp-ctl → git-policy-ctl و رد دستورهای خطرناک | ✅ |
+| همگام‌سازی گروه‌ها با job جنکینز، محافظ کاهش ۳۰٪، `FORCE`، W010 | ✅ |
+| **TEST 17**: Jenkins خاموش است → enforcement ادامه دارد | ✅ |
+| **TEST 18**: GitLab API در دسترس نیست → cache قبلی دست‌نخورده می‌ماند و قوانین گروه کار می‌کنند | ✅ |
 
 ### ۱۸.۳ یافته‌های مهم از GitLab واقعی
 
-1. **deploy key:** `GL_USERNAME` نام کاربری **سازنده‌ی کلید** است (در تست `root`) و `GL_ID=key-N`. یعنی قوانین کاربری آن شخص روی deploy keyهای او هم اعمال می‌شود. هنگام نوشتن policy این را در نظر بگیرید.
+1. **deploy key:** `GL_USERNAME` نام کاربری **سازنده‌ی کلید** است (در تست `root`) و `GL_ID=key-N`. یعنی قوانین کاربری **و گروهی** آن شخص روی deploy keyهای او هم اعمال می‌شود. در تست، GitLab سازنده‌ی گروه (`root`) را خودکار عضو گروه `contractors` کرده بود، و به همین دلیل push با deploy key او رد شد. deploy keyها را با یک حساب سرویس مخصوص بسازید.
 2. **merge کردن MR:** GitLab پیام hook را در صفحه‌ی MR نشان نمی‌دهد و فقط می‌گوید «Branch cannot be merged». دلیل دقیق در audit log هست و با `explain` هم قابل بررسی است.
 3. **Web UI:** خطوط پیام با `<br>` نمایش داده می‌شوند و کاربر کل پیام (قانون، فایل، اقدام لازم) را می‌بیند.
 4. **دو باگ در `git-policy-ctl`** فقط در lab پیدا و رفع شدند:
    - sudo به‌طور پیش‌فرض `SSH_ORIGINAL_COMMAND` را پاک می‌کند؛ `env_keep` مخصوص همین دستور لازم است.
    - regex در bash تکرار بیشتر از ۲۵۵ را قبول نمی‌کند.
-5. **تأخیر:** یک push کامل HTTP روی lab با git-policy فعال حدود ۴۰۰ میلی‌ثانیه طول کشید، که بیشترش خود GitLab است.
+5. **دو باگ در pipeline و ابزار sync** هم فقط با Jenkins واقعی پیدا شدند:
+   - در اولین اجرای یک job جدید، پارامترهای pipeline هنوز تعریف نشده‌اند (`FORCE` خالی بود).
+   - credential فایل‌محور Jenkins یک newline به انتهای token اضافه می‌کرد.
+
+   هر دو رفع شدند: موتور حالا فاصله‌های اضافه‌ی token را حذف می‌کند و token دارای کاراکتر کنترلی را با پیام واضح رد می‌کند.
+6. **تأخیر:** یک push کامل HTTP روی lab با git-policy فعال حدود ۴۰۰ میلی‌ثانیه طول کشید، که بیشترش خود GitLab است.
 
 ---
 
-## ۱۹. واژه‌نامه
+## ۱۹. فاز ۱۰: همگام‌سازی عضویت گروه‌ها از GitLab
+
+### ۱۹.۱ جریان کار
+
+<div dir="ltr">
+
+```
+Jenkins job: git-policy-sync-membership  (هر ۱۵ دقیقه + اجرای دستی)
+  │ ۱. ctl groups              ← گروه‌هایی که policy فعال سرور استفاده می‌کند
+  │ ۲. git-policy sync-membership --gitlab-url … --groups …
+  │      ← فقط همان گروه‌ها از GitLab API؛ token فقط در credentials جنکینز
+  │ ۳. ctl apply-membership < membership.json
+  ▼                            ← سرور: بررسی، محافظ ایمنی، نوشتن اتمیک (+ previous.json)
+membership/current.json        ← hook فقط این فایل محلی را می‌خواند
+```
+
+</div>
+
+- **token هرگز روی سرور GitLab ذخیره نمی‌شود** و در console جنکینز هم ماسک می‌شود (در تست بررسی شد).
+- **عضویت طبق منطق خود GitLab است:** کاربر عضو گروه G است اگر مستقیم یا از طریق گروه‌های **والد** عضو باشد. عضویت در **زیرگروه** شخص را عضو گروه والد نمی‌کند.
+
+### ۱۹.۲ محافظ‌های ایمنی (سمت سرور)
+
+`admin apply-membership` در این حالت‌ها **رد می‌کند**، مگر با `FORCE=true` در Jenkins (یا `--force`):
+
+| حالت | چرا |
+|---|---|
+| تعداد عضویت‌ها بیش از **۳۰٪** کم شده (وقتی قبلاً حداقل ۱۰ عضویت بوده) | معمولاً نشانه‌ی خرابی API یا تغییر مجوز token است، نه تغییر واقعی |
+| گروهی که policy فعال استفاده می‌کند در فایل نیست | فایل ناقص است |
+| داده قدیمی‌تر از `hard_max_age` است | فایل کهنه نباید جایگزین فایل تازه شود |
+| `generated_at` در آینده است | مشکل ساعت |
+
+اگر یک گروه policy در GitLab **وجود نداشته باشد**، sync کلاً شکست می‌خورد و **هیچ فایلی** نوشته نمی‌شود.
+
+### ۱۹.۳ هشدار W010: نام‌هایی که در GitLab نیستند
+
+sync یک **inventory** (همه‌ی کاربران، گروه‌ها و پروژه‌ها) هم می‌سازد. validator با آن غلط‌های املایی را پیدا می‌کند:
+
+<div dir="ltr">
+
+```bash
+git-policy sync-membership --gitlab-url https://gitlab.example.com --policy policy.yaml \
+    -o membership.json --inventory-out inventory.json          # token: $GITLAB_TOKEN
+git-policy validate --inventory inventory.json policy.yaml
+#   WARNING W010  users.alexx: user "alexx" does not exist in GitLab (inventory)
+```
+
+</div>
+
+### ۱۹.۴ عملیات
+
+| کار | چطور |
+|---|---|
+| اجرای فوری sync | Jenkins ← `git-policy-sync-membership` ← Build |
+| عبور از محافظ بعد از بررسی GitLab | Build with Parameters ← `FORCE=true` |
+| دیدن وضعیت cache | `ctl status` یا job `git-policy-status` ← خط `Membership cache: fresh (…)` |
+| اگر GitLab API در دسترس نیست | کاری لازم نیست: sync شکست می‌خورد و cache قبلی می‌ماند؛ بعد از ۲۴ ساعت allowهای گروهی نادیده گرفته می‌شوند (فقط محدود می‌کند) |
+
+---
+
+## ۲۰. واژه‌نامه
 
 | واژه | معنی |
 |---|---|

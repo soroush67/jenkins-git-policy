@@ -117,17 +117,29 @@ func readFile(path string) (*File, error) {
 		}
 		return nil, err
 	}
+	f, err := Parse(b)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", filepath.Base(path), err)
+	}
+	return f, nil
+}
+
+// MaxSize bounds a membership file.
+const MaxSize = maxSize
+
+// Parse decodes and normalises a membership document strictly.
+func Parse(b []byte) (*File, error) {
 	var f File
 	dec := json.NewDecoder(bytes.NewReader(b))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&f); err != nil {
-		return nil, fmt.Errorf("%s: malformed: %w", filepath.Base(path), err)
+		return nil, fmt.Errorf("malformed: %w", err)
 	}
 	if f.Schema != Schema {
-		return nil, fmt.Errorf("%s: unknown schema %q", filepath.Base(path), f.Schema)
+		return nil, fmt.Errorf("unknown schema %q", f.Schema)
 	}
 	if f.GeneratedAt.IsZero() {
-		return nil, fmt.Errorf("%s: generated_at missing", filepath.Base(path))
+		return nil, errors.New("generated_at missing")
 	}
 	// Normalise: usernames and group paths are case-insensitive in GitLab.
 	users := make(map[string]UserEntry, len(f.Users))
@@ -140,4 +152,14 @@ func readFile(path string) (*File, error) {
 	}
 	f.Users = users
 	return &f, nil
+}
+
+// Pairs counts user->group memberships (the size measure used by the
+// apply-membership safety guard).
+func (f *File) Pairs() int {
+	n := 0
+	for _, u := range f.Users {
+		n += len(u.Groups)
+	}
+	return n
 }
