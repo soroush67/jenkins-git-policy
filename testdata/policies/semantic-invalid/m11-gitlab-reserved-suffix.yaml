@@ -1,0 +1,6 @@
+# expect: V011 (GitLab paths cannot end with .git)
+apiVersion: git-policy/v1
+kind: GitPolicy
+metadata: {name: t, revision: 1}
+projects:
+  finance/payment-api.git: {max_file_size: 5MiB}

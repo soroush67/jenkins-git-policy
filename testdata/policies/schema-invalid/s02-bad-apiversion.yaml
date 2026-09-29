@@ -1,0 +1,4 @@
+# expect: V004
+apiVersion: git-policy/v2
+kind: GitPolicy
+metadata: {name: t, revision: 1}

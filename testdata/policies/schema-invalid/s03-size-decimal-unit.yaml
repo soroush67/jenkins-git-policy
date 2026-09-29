@@ -1,0 +1,6 @@
+# expect: V005 (MB not allowed, use MiB)
+apiVersion: git-policy/v1
+kind: GitPolicy
+metadata: {name: t, revision: 1}
+defaults:
+  max_file_size: 20MB

@@ -1,0 +1,8 @@
+# expect: V003 (bypass flags do not exist; use exceptions)
+apiVersion: git-policy/v1
+kind: GitPolicy
+metadata: {name: t, revision: 1}
+groups:
+  devops:
+    push: allow
+    bypass_content_policy: true

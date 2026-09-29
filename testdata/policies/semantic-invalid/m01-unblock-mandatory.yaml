@@ -1,0 +1,9 @@
+# expect: V020 (cannot unblock a mandatory extension)
+apiVersion: git-policy/v1
+kind: GitPolicy
+metadata: {name: t, revision: 1}
+mandatory:
+  blocked_extensions: [dll]
+projects:
+  finance/legacy-erp:
+    unblock_extensions: [DLL]

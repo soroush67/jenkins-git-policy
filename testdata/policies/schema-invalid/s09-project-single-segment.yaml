@@ -1,0 +1,7 @@
+# expect: V012 (project path needs namespace/project)
+apiVersion: git-policy/v1
+kind: GitPolicy
+metadata: {name: t, revision: 1}
+projects:
+  payment-api:
+    max_file_size: 5MiB

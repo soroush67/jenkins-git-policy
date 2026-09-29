@@ -1,0 +1,7 @@
+# expect: V002 (PyYAML silently keeps the last one; the Go decoder must reject)
+apiVersion: git-policy/v1
+kind: GitPolicy
+metadata: {name: t, revision: 1}
+users:
+  alex: {push: deny}
+  alex: {push: allow}

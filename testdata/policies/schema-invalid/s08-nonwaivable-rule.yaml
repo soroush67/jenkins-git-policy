@@ -1,0 +1,10 @@
+# expect: V035 (system rules cannot be waived)
+apiVersion: git-policy/v1
+kind: GitPolicy
+metadata: {name: t, revision: 1}
+exceptions:
+  - id: EXC-1
+    rules: [POLICY_UNAVAILABLE]
+    subjects: {users: [jenkins]}
+    reason: keep CI green when policy is broken
+    expires: 2026-12-01

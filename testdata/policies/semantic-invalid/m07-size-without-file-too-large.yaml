@@ -1,0 +1,11 @@
+# expect: V034
+apiVersion: git-policy/v1
+kind: GitPolicy
+metadata: {name: t, revision: 1}
+exceptions:
+  - id: EXC-1
+    rules: [BLOCKED_EXTENSION]
+    subjects: {users: [a]}
+    max_file_size: 100MiB
+    reason: size on an extension waiver
+    expires: 2026-12-01

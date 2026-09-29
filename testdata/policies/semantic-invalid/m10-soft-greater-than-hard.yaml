@@ -1,0 +1,6 @@
+# expect: V041
+apiVersion: git-policy/v1
+kind: GitPolicy
+metadata: {name: t, revision: 1}
+settings:
+  membership: {soft_max_age: 48h, hard_max_age: 24h}

@@ -1,0 +1,7 @@
+# expect: V022 (mandatory has no refs; it is global and ref-independent)
+apiVersion: git-policy/v1
+kind: GitPolicy
+metadata: {name: t, revision: 1}
+mandatory:
+  refs:
+    refs/heads/main: {blocked_extensions: [dll]}

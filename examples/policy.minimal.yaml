@@ -1,0 +1,10 @@
+# yaml-language-server: $schema=../schema/policy.v1.schema.json
+# Smallest useful policy: the PoC behaviour (block DLLs everywhere), in audit mode.
+apiVersion: git-policy/v1
+kind: GitPolicy
+metadata:
+  name: org-git-policy
+  revision: 1
+mandatory:
+  mode: audit
+  blocked_extensions: [dll]

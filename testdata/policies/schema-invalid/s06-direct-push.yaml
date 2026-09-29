@@ -1,0 +1,7 @@
+# expect: V003 (direct_push is delegated to GitLab Protected Branches)
+apiVersion: git-policy/v1
+kind: GitPolicy
+metadata: {name: t, revision: 1}
+branches:
+  main:
+    direct_push: deny

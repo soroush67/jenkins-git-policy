@@ -1,0 +1,9 @@
+# expect: V021
+apiVersion: git-policy/v1
+kind: GitPolicy
+metadata: {name: t, revision: 1}
+mandatory:
+  max_file_size: 50MiB
+projects:
+  analytics/forecast:
+    max_file_size: 200MiB

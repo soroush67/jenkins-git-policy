@@ -1,0 +1,9 @@
+# expect: V005 (expires is required)
+apiVersion: git-policy/v1
+kind: GitPolicy
+metadata: {name: t, revision: 1}
+exceptions:
+  - id: EXC-1
+    rules: [FILE_TOO_LARGE]
+    subjects: {users: [jenkins]}
+    reason: CI publishes build caches

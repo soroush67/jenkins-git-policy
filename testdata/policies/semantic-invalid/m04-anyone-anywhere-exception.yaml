@@ -1,0 +1,10 @@
+# expect: V031 (no subjects and no project/namespace scope)
+apiVersion: git-policy/v1
+kind: GitPolicy
+metadata: {name: t, revision: 1}
+exceptions:
+  - id: EXC-1
+    rules: [BLOCKED_PATH]
+    scope: {paths: ["**/obj/**"]}
+    reason: allow obj folders everywhere
+    expires: 2026-12-01

@@ -1,0 +1,130 @@
+# yaml-language-server: $schema=../schema/policy.v1.schema.json
+#
+# Reference policy for git-policy (schema git-policy/v1).
+# The worked examples E01–E23 in docs/design/PHASE-2-SCHEMA.md are computed
+# against THIS file — keep them in sync.
+
+apiVersion: git-policy/v1
+kind: GitPolicy
+
+metadata:
+  name: org-git-policy
+  revision: 1
+  description: Organization-wide Git content and identity policy.
+
+settings:
+  mode: enforce
+  repository_types:
+    project: all
+    wiki: mandatory_only
+    snippet: mandatory_only
+    design: none
+  limits:
+    max_ref_updates: 1000
+    max_new_commits: 50000
+    max_new_blobs: 500000
+    evaluation_timeout: 45s
+  membership:
+    soft_max_age: 2h
+    hard_max_age: 24h
+    on_unavailable: deny_if_group_rules
+  audit:
+    required: false
+    retention_days: 180
+  exceptions:
+    max_lifetime_days: 180
+  messages:
+    header: "Push rejected by organizational Git policy."
+    support: "Help: #devops-help"
+    remediation:
+      BLOCKED_EXTENSION: >-
+        Binary dependencies must not be committed to Git. Publish them as NuGet
+        packages to Nexus and reference them with PackageReference.
+      BLOCKED_SIGNATURE: >-
+        This file is a Windows executable or library, whatever its name.
+        Publish it to Nexus instead of committing it.
+      FILE_TOO_LARGE: "Store large artifacts in Nexus, not in Git."
+
+# Security floor. Only exceptions with `mandatory: true` can pass it.
+mandatory:
+  mode: enforce
+  blocked_extensions: [dll, exe]
+  max_file_size: 50MiB
+  deny_users: [terminated.user]
+  deny_groups: []
+
+# Organization-wide, overridable baseline.
+defaults:
+  blocked_extensions: [pdb, msi, zip, rar, 7z, iso, nupkg]
+  max_file_size: 20MiB
+
+namespaces:
+  finance:
+    max_file_size: 10MiB
+    blocked_paths:
+      - "**/bin/Debug/**"
+      - "**/bin/Release/**"
+      - "**/obj/**"
+    refs:
+      "refs/heads/release/**":
+        blocked_signatures: [pe]
+
+  finance/legacy:
+    mode: audit              # roll-out: log non-mandatory violations only
+
+projects:
+  finance/payment-api:
+    max_file_size: 5MiB
+
+  finance/reporting:
+    unblock_extensions: [zip]   # reporting ships zipped report templates
+
+  sandbox/playground:
+    enabled: false              # mandatory rules only
+
+users:
+  alex:
+    projects:
+      finance/payment-api: {push: deny}
+      finance/reporting:   {push: allow}
+
+groups:
+  contractors:
+    push: deny
+    namespaces:
+      outsourcing: {push: allow}
+
+exceptions:
+  - id: EXC-2026-001
+    rules: [BLOCKED_EXTENSION]
+    mandatory: true
+    scope:
+      projects: [finance/legacy-erp]
+      refs: ["refs/heads/main"]
+      paths: ["vendor/VendorSdk/*.dll"]
+    reason: Vendor SDK has no NuGet package yet; migration tracked in INFRA-2231.
+    ticket: INFRA-2231
+    approved_by: security-team
+    expires: 2026-12-31
+
+  - id: EXC-2026-002
+    rules: [LIMIT_COMMITS, LIMIT_OBJECTS]
+    subjects:
+      users: [svc-migration]
+    scope:
+      namespaces: [legacy]
+    reason: One-time import of legacy SVN history into GitLab.
+    ticket: INFRA-2240
+    expires: 2026-10-31
+
+  - id: EXC-2026-003
+    rules: [FILE_TOO_LARGE]
+    mandatory: true
+    subjects:
+      groups: [data-science]
+    scope:
+      projects: [analytics/forecast]
+    max_file_size: 200MiB
+    reason: Model snapshots until the MLflow artifact store is available.
+    ticket: DS-118
+    expires: 2026-12-15

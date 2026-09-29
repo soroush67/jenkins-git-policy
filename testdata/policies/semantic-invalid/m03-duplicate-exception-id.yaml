@@ -1,0 +1,7 @@
+# expect: V030
+apiVersion: git-policy/v1
+kind: GitPolicy
+metadata: {name: t, revision: 1}
+exceptions:
+  - {id: EXC-1, rules: [FILE_TOO_LARGE], subjects: {users: [a]}, reason: first exception here, expires: 2026-12-01}
+  - {id: EXC-1, rules: [BLOCKED_PATH], subjects: {users: [b]}, reason: second exception here, expires: 2026-12-01}

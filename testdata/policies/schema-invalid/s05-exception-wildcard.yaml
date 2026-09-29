@@ -1,0 +1,10 @@
+# expect: V035 ("*" is not a rule code)
+apiVersion: git-policy/v1
+kind: GitPolicy
+metadata: {name: t, revision: 1}
+exceptions:
+  - id: EXC-1
+    rules: ["*"]
+    subjects: {users: [jenkins]}
+    reason: blanket bypass for CI
+    expires: 2026-12-01

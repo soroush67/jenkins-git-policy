@@ -1,0 +1,337 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://git-policy.local/schema/policy.v1.schema.json",
+  "title": "git-policy policy document (apiVersion git-policy/v1)",
+  "description": "Structural schema for editors and CI. The authoritative validator is `git-policy validate`, which additionally enforces the semantic checks (V010-V041) documented in docs/design/PHASE-2-SCHEMA.md.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["apiVersion", "kind", "metadata"],
+  "properties": {
+    "apiVersion": {"const": "git-policy/v1"},
+    "kind": {"const": "GitPolicy"},
+    "metadata": {"$ref": "#/$defs/metadata"},
+    "settings": {"$ref": "#/$defs/settings"},
+    "mandatory": {"$ref": "#/$defs/mandatory"},
+    "defaults": {"$ref": "#/$defs/defaults"},
+    "namespaces": {
+      "type": "object",
+      "propertyNames": {"$ref": "#/$defs/namespacePath"},
+      "additionalProperties": {"$ref": "#/$defs/namespaceScope"}
+    },
+    "projects": {
+      "type": "object",
+      "propertyNames": {"$ref": "#/$defs/projectPath"},
+      "additionalProperties": {"$ref": "#/$defs/projectScope"}
+    },
+    "users": {
+      "type": "object",
+      "propertyNames": {"$ref": "#/$defs/userName"},
+      "additionalProperties": {"$ref": "#/$defs/identityRule"}
+    },
+    "groups": {
+      "type": "object",
+      "propertyNames": {"$ref": "#/$defs/namespacePath"},
+      "additionalProperties": {"$ref": "#/$defs/identityRule"}
+    },
+    "exceptions": {
+      "type": "array",
+      "maxItems": 1000,
+      "items": {"$ref": "#/$defs/exception"}
+    }
+  },
+
+  "$defs": {
+    "mode": {"enum": ["enforce", "audit"]},
+    "action": {"enum": ["allow", "deny"]},
+    "size": {
+      "type": "string",
+      "pattern": "^[1-9][0-9]{0,5}(B|KiB|MiB|GiB)$",
+      "description": "Binary units only, e.g. 512KiB, 20MiB, 1GiB."
+    },
+    "duration": {"type": "string", "pattern": "^[1-9][0-9]{0,4}(s|m|h)$"},
+    "date": {"type": "string", "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$"},
+    "safeText": {"type": "string", "maxLength": 1000, "pattern": "^[^\\u0000-\\u0008\\u000b-\\u001f\\u007f]*$"},
+
+    "pathSegment": {"type": "string", "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]{0,254}$"},
+    "namespacePath": {
+      "type": "string",
+      "maxLength": 1024,
+      "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]{0,254}(/[A-Za-z0-9_][A-Za-z0-9_.-]{0,254}){0,19}$"
+    },
+    "projectPath": {
+      "type": "string",
+      "maxLength": 1024,
+      "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]{0,254}(/[A-Za-z0-9_][A-Za-z0-9_.-]{0,254}){1,20}$"
+    },
+    "userName": {
+      "type": "string",
+      "pattern": "^(@unknown|[A-Za-z0-9_][A-Za-z0-9_.-]{0,254})$"
+    },
+    "extension": {
+      "type": "string",
+      "maxLength": 32,
+      "pattern": "^\\.?[A-Za-z0-9][A-Za-z0-9_+-]*(\\.[A-Za-z0-9_+-]+)*$"
+    },
+    "pathGlob": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512,
+      "pattern": "^[^/\\u0000-\\u001f\\u007f][^\\u0000-\\u001f\\u007f]*$"
+    },
+    "refGlob": {
+      "type": "string",
+      "maxLength": 255,
+      "pattern": "^refs/[A-Za-z0-9._/*?@+-]+$"
+    },
+    "signature": {"enum": ["pe"]},
+
+    "extensionList": {"type": "array", "items": {"$ref": "#/$defs/extension"}, "maxItems": 500},
+    "pathList": {"type": "array", "items": {"$ref": "#/$defs/pathGlob"}, "maxItems": 500},
+    "signatureList": {"type": "array", "items": {"$ref": "#/$defs/signature"}, "uniqueItems": true},
+
+    "ruleCode": {
+      "enum": [
+        "MANDATORY_USER_DENIED", "MANDATORY_GROUP_DENIED", "USER_PUSH_DENIED", "GROUP_PUSH_DENIED",
+        "BLOCKED_EXTENSION", "BLOCKED_PATH", "BLOCKED_SIGNATURE", "FILE_TOO_LARGE",
+        "LIMIT_REF_UPDATES", "LIMIT_COMMITS", "LIMIT_OBJECTS", "EVAL_TIMEOUT",
+        "POLICY_UNAVAILABLE", "MEMBERSHIP_UNAVAILABLE", "INVALID_REF_UPDATE", "INTERNAL_ERROR"
+      ]
+    },
+    "waivableRuleCode": {
+      "enum": [
+        "MANDATORY_USER_DENIED", "MANDATORY_GROUP_DENIED", "USER_PUSH_DENIED", "GROUP_PUSH_DENIED",
+        "BLOCKED_EXTENSION", "BLOCKED_PATH", "BLOCKED_SIGNATURE", "FILE_TOO_LARGE",
+        "LIMIT_REF_UPDATES", "LIMIT_COMMITS", "LIMIT_OBJECTS"
+      ]
+    },
+
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "revision"],
+      "properties": {
+        "name": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,62}$"},
+        "revision": {"type": "integer", "minimum": 1},
+        "description": {"$ref": "#/$defs/safeText"}
+      }
+    },
+
+    "settings": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "mode": {"$ref": "#/$defs/mode"},
+        "repository_types": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "project": {"enum": ["all", "mandatory_only", "none"]},
+            "wiki": {"enum": ["all", "mandatory_only", "none"]},
+            "snippet": {"enum": ["all", "mandatory_only", "none"]},
+            "design": {"enum": ["all", "mandatory_only", "none"]}
+          }
+        },
+        "limits": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "max_ref_updates": {"type": "integer", "minimum": 1, "maximum": 100000},
+            "max_new_commits": {"type": "integer", "minimum": 1, "maximum": 10000000},
+            "max_new_blobs": {"type": "integer", "minimum": 1, "maximum": 100000000},
+            "evaluation_timeout": {"$ref": "#/$defs/duration"}
+          }
+        },
+        "membership": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "soft_max_age": {"$ref": "#/$defs/duration"},
+            "hard_max_age": {"$ref": "#/$defs/duration"},
+            "on_unavailable": {"enum": ["deny_if_group_rules", "ignore_groups"]}
+          }
+        },
+        "audit": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "required": {"type": "boolean"},
+            "retention_days": {"type": "integer", "minimum": 1, "maximum": 3650}
+          }
+        },
+        "exceptions": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "max_lifetime_days": {"type": "integer", "minimum": 1, "maximum": 366}
+          }
+        },
+        "messages": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "header": {"$ref": "#/$defs/safeText"},
+            "support": {"$ref": "#/$defs/safeText"},
+            "remediation": {
+              "type": "object",
+              "propertyNames": {"$ref": "#/$defs/ruleCode"},
+              "additionalProperties": {"$ref": "#/$defs/safeText"}
+            }
+          }
+        }
+      }
+    },
+
+    "mandatory": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "mode": {"$ref": "#/$defs/mode"},
+        "blocked_extensions": {"$ref": "#/$defs/extensionList"},
+        "blocked_paths": {"$ref": "#/$defs/pathList"},
+        "blocked_signatures": {"$ref": "#/$defs/signatureList"},
+        "max_file_size": {"$ref": "#/$defs/size"},
+        "deny_users": {"type": "array", "items": {"$ref": "#/$defs/userName"}},
+        "deny_groups": {"type": "array", "items": {"$ref": "#/$defs/namespacePath"}}
+      }
+    },
+
+    "defaults": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "blocked_extensions": {"$ref": "#/$defs/extensionList"},
+        "blocked_paths": {"$ref": "#/$defs/pathList"},
+        "blocked_signatures": {"$ref": "#/$defs/signatureList"},
+        "max_file_size": {"$ref": "#/$defs/size"},
+        "refs": {"$ref": "#/$defs/refScopes"}
+      }
+    },
+
+    "refScope": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "mode": {"$ref": "#/$defs/mode"},
+        "blocked_extensions": {"$ref": "#/$defs/extensionList"},
+        "blocked_paths": {"$ref": "#/$defs/pathList"},
+        "blocked_signatures": {"$ref": "#/$defs/signatureList"},
+        "unblock_extensions": {"$ref": "#/$defs/extensionList"},
+        "unblock_paths": {"$ref": "#/$defs/pathList"},
+        "unblock_signatures": {"$ref": "#/$defs/signatureList"},
+        "max_file_size": {"$ref": "#/$defs/size"}
+      }
+    },
+    "refScopes": {
+      "type": "object",
+      "propertyNames": {"$ref": "#/$defs/refGlob"},
+      "additionalProperties": {"$ref": "#/$defs/refScope"}
+    },
+
+    "namespaceScope": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "mode": {"$ref": "#/$defs/mode"},
+        "blocked_extensions": {"$ref": "#/$defs/extensionList"},
+        "blocked_paths": {"$ref": "#/$defs/pathList"},
+        "blocked_signatures": {"$ref": "#/$defs/signatureList"},
+        "unblock_extensions": {"$ref": "#/$defs/extensionList"},
+        "unblock_paths": {"$ref": "#/$defs/pathList"},
+        "unblock_signatures": {"$ref": "#/$defs/signatureList"},
+        "max_file_size": {"$ref": "#/$defs/size"},
+        "refs": {"$ref": "#/$defs/refScopes"}
+      }
+    },
+    "projectScope": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "mode": {"$ref": "#/$defs/mode"},
+        "blocked_extensions": {"$ref": "#/$defs/extensionList"},
+        "blocked_paths": {"$ref": "#/$defs/pathList"},
+        "blocked_signatures": {"$ref": "#/$defs/signatureList"},
+        "unblock_extensions": {"$ref": "#/$defs/extensionList"},
+        "unblock_paths": {"$ref": "#/$defs/pathList"},
+        "unblock_signatures": {"$ref": "#/$defs/signatureList"},
+        "max_file_size": {"$ref": "#/$defs/size"},
+        "refs": {"$ref": "#/$defs/refScopes"}
+      }
+    },
+
+    "refActions": {
+      "type": "object",
+      "propertyNames": {"$ref": "#/$defs/refGlob"},
+      "additionalProperties": {"$ref": "#/$defs/action"}
+    },
+    "scopedIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "push": {"$ref": "#/$defs/action"},
+        "refs": {"$ref": "#/$defs/refActions"}
+      }
+    },
+    "identityRule": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "push": {"$ref": "#/$defs/action"},
+        "refs": {"$ref": "#/$defs/refActions"},
+        "namespaces": {
+          "type": "object",
+          "propertyNames": {"$ref": "#/$defs/namespacePath"},
+          "additionalProperties": {"$ref": "#/$defs/scopedIdentity"}
+        },
+        "projects": {
+          "type": "object",
+          "propertyNames": {"$ref": "#/$defs/projectPath"},
+          "additionalProperties": {"$ref": "#/$defs/scopedIdentity"}
+        }
+      }
+    },
+
+    "exception": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "rules", "reason", "expires"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^[A-Z][A-Z0-9-]{2,63}$"},
+        "rules": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/waivableRuleCode"}
+        },
+        "mandatory": {"type": "boolean"},
+        "subjects": {
+          "type": "object",
+          "additionalProperties": false,
+          "minProperties": 1,
+          "properties": {
+            "users": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/userName"}},
+            "groups": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/namespacePath"}}
+          }
+        },
+        "scope": {
+          "type": "object",
+          "additionalProperties": false,
+          "minProperties": 1,
+          "properties": {
+            "namespaces": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/namespacePath"}},
+            "projects": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/projectPath"}},
+            "refs": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/refGlob"}},
+            "paths": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/pathGlob"}}
+          }
+        },
+        "max_file_size": {"$ref": "#/$defs/size"},
+        "reason": {"allOf": [{"$ref": "#/$defs/safeText"}, {"minLength": 10}]},
+        "ticket": {"type": "string", "maxLength": 64, "pattern": "^[A-Za-z0-9._#/-]+$"},
+        "approved_by": {"$ref": "#/$defs/safeText"},
+        "expires": {"$ref": "#/$defs/date"}
+      }
+    }
+  }
+}

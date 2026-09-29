@@ -1,0 +1,6 @@
+# expect: V003 (typo blocked_extentions)
+apiVersion: git-policy/v1
+kind: GitPolicy
+metadata: {name: t, revision: 1}
+defaults:
+  blocked_extentions: [dll]

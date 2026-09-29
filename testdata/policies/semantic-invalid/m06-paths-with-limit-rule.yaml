@@ -1,0 +1,11 @@
+# expect: V033 (limits have no path)
+apiVersion: git-policy/v1
+kind: GitPolicy
+metadata: {name: t, revision: 1}
+exceptions:
+  - id: EXC-1
+    rules: [LIMIT_COMMITS]
+    subjects: {users: [svc-migration]}
+    scope: {paths: ["src/**"]}
+    reason: import of legacy history
+    expires: 2026-12-01

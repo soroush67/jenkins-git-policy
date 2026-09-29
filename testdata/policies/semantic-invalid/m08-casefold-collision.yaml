@@ -1,0 +1,7 @@
+# expect: V010 (Finance and finance are the same GitLab namespace)
+apiVersion: git-policy/v1
+kind: GitPolicy
+metadata: {name: t, revision: 1}
+namespaces:
+  Finance: {max_file_size: 10MiB}
+  finance: {max_file_size: 5MiB}

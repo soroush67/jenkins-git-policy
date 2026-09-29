@@ -1,0 +1,7 @@
+# expect: V005 (ref globs must start with refs/)
+apiVersion: git-policy/v1
+kind: GitPolicy
+metadata: {name: t, revision: 1}
+users:
+  alex:
+    refs: {main: deny}

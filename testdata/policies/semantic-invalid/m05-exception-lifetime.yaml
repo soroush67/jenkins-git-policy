@@ -1,0 +1,10 @@
+# expect: V032 (beyond settings.exceptions.max_lifetime_days = 180)
+apiVersion: git-policy/v1
+kind: GitPolicy
+metadata: {name: t, revision: 1}
+exceptions:
+  - id: EXC-1
+    rules: [FILE_TOO_LARGE]
+    subjects: {users: [svc-data]}
+    reason: long-lived waiver requested
+    expires: 2030-01-01
