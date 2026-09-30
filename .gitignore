@@ -9,3 +9,7 @@ lab/ctl/jenkins_ctl_key
 lab/ctl/jenkins_ctl_key.pub
 lab/ctl/authorized_keys
 lab/ctl/git-policy-ctl
+
+# real deployment (deploy/jenkins/setup.sh): generated secrets and settings
+deploy/jenkins/.secrets/
+deploy/jenkins/.env

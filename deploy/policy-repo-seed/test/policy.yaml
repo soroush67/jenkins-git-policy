@@ -1,0 +1,24 @@
+# TEST environment policy (applied automatically after every push to main).
+# How to write policies: docs/fa/POLICY-FA.md in the git-policy repository.
+apiVersion: git-policy/v1
+kind: GitPolicy
+metadata:
+  name: org-policy-test
+  revision: 1
+  description: Initial organisation policy (TEST).
+settings:
+  audit: {log_accepted: true}
+  messages:
+    support: "Help: #devops-help"
+    remediation:
+      BLOCKED_EXTENSION: "Binary dependencies do not belong in Git. Publish them as NuGet packages to Nexus."
+      BLOCKED_SIGNATURE: "This file is a Windows executable, whatever its name. Publish it to Nexus."
+      BLOCKED_PATH: "Build output (bin/, obj/) must not be committed. Check your .gitignore."
+mandatory:
+  blocked_extensions: [dll, exe]
+  blocked_signatures: [pe]
+  max_file_size: 50MiB
+defaults:
+  blocked_extensions: [pdb, nupkg]
+  blocked_paths: ["**/bin/Debug/**", "**/bin/Release/**", "**/obj/**"]
+  max_file_size: 20MiB

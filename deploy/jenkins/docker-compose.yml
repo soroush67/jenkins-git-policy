@@ -1,0 +1,37 @@
+# Jenkins control plane for git-policy on a real host. Created and started
+# by setup.sh (which also writes .env and fills the secrets volume); do not
+# start it by hand before setup.sh has run once.
+name: git-policy-jenkins
+
+services:
+  jenkins:
+    build:
+      context: ../../lab/jenkins          # same image as the lab: Jenkins + plugins + ssh/python3
+      args:
+        JENKINS_IMAGE: ${JENKINS_IMAGE:-jenkins/jenkins:lts-jdk17}
+    image: git-policy-jenkins:local
+    container_name: gp-jenkins
+    restart: unless-stopped
+    ports:
+      - "${JENKINS_PORT:-8081}:8080"
+    environment:
+      CASC_JENKINS_CONFIG: /opt/git-policy-casc/casc.yaml
+      JAVA_OPTS: -Djenkins.install.runSetupWizard=false
+      JENKINS_URL: ${JENKINS_URL:?run setup.sh}
+      GP_POLICY_REPO: ${GP_POLICY_REPO:?run setup.sh}
+      GP_CTL_TEST: ${GP_CTL_TEST:?run setup.sh}
+      GP_CTL_PRODUCTION: ${GP_CTL_PRODUCTION:?run setup.sh}
+      GP_GITLAB_URL_TEST: ${GP_GITLAB_URL_TEST:?run setup.sh}
+      GP_GITLAB_URL_PRODUCTION: ${GP_GITLAB_URL_PRODUCTION:?run setup.sh}
+      GP_APPROVERS: ${GP_APPROVERS:-approver}
+      GP_BIN: ${GP_BIN:?run setup.sh}
+    volumes:
+      - jenkins-home:/var/jenkins_home
+      - secrets:/run/git-policy-secrets:ro          # filled by setup.sh, owned by the jenkins user
+      - ./casc.yaml:/opt/git-policy-casc/casc.yaml:ro
+      - ../../dist:/opt/git-policy:ro                # git-policy binary for the agent (GP_BIN)
+      - ../../jenkins:/opt/git-policy-jenkins:ro     # the pipelines
+
+volumes:
+  jenkins-home:
+  secrets:

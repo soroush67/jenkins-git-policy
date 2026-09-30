@@ -1,0 +1,88 @@
+# Jenkins configuration as code for a real git-policy deployment
+# (deploy/jenkins/setup.sh). Non-secret settings come from environment
+# variables (.env, written by setup.sh); secrets are read from files in the
+# secrets volume and are therefore NOT visible to pipelines through `env`.
+jenkins:
+  systemMessage: "git-policy control plane"
+  numExecutors: 2
+  securityRealm:
+    local:
+      allowsSignup: false
+      users:
+        - id: admin
+          password: ${readFile:/run/git-policy-secrets/jenkins-admin-password}
+        - id: approver
+          password: ${readFile:/run/git-policy-secrets/jenkins-approver-password}
+  authorizationStrategy:
+    loggedInUsersCanDoAnything:
+      allowAnonymousRead: false
+  # Global variables read by jenkins/Jenkinsfile, Jenkinsfile.gitops and
+  # Jenkinsfile.sync-membership (see the Jenkinsfile header).
+  globalNodeProperties:
+    - envVars:
+        env:
+          - {key: GP_POLICY_REPO, value: "${GP_POLICY_REPO}"}
+          - {key: GP_POLICY_REPO_CRED, value: git-policy-config-read}
+          - {key: GP_CTL_TEST, value: "${GP_CTL_TEST}"}
+          - {key: GP_CTL_PRODUCTION, value: "${GP_CTL_PRODUCTION}"}
+          - {key: GP_SSH_CRED_TEST, value: git-policy-ssh-test}
+          - {key: GP_SSH_CRED_PRODUCTION, value: git-policy-ssh-prod}
+          - {key: GP_GITLAB_URL_TEST, value: "${GP_GITLAB_URL_TEST}"}
+          - {key: GP_GITLAB_URL_PRODUCTION, value: "${GP_GITLAB_URL_PRODUCTION}"}
+          - {key: GP_GITLAB_TOKEN_TEST, value: gitlab-api-readonly}
+          - {key: GP_GITLAB_TOKEN_PRODUCTION, value: gitlab-api-readonly}
+          - {key: GP_APPROVERS, value: "${GP_APPROVERS}"}
+          - {key: GP_BIN, value: "${GP_BIN}"}
+          - {key: GP_SSH_KNOWN_HOSTS, value: /run/git-policy-secrets/known_hosts}
+credentials:
+  system:
+    domainCredentials:
+      - credentials:
+          - basicSSHUserPrivateKey:
+              scope: GLOBAL
+              id: git-policy-ssh-test
+              username: gitpolicy-deploy
+              description: "git-policy-ctl forced-command channel (TEST)"
+              privateKeySource:
+                directEntry:
+                  privateKey: ${readFile:/run/git-policy-secrets/jenkins_ctl_key}
+          - basicSSHUserPrivateKey:
+              scope: GLOBAL
+              id: git-policy-ssh-prod
+              username: gitpolicy-deploy
+              description: "git-policy-ctl forced-command channel (PRODUCTION)"
+              privateKeySource:
+                directEntry:
+                  privateKey: ${readFile:/run/git-policy-secrets/jenkins_ctl_key}
+          - string:
+              scope: GLOBAL
+              id: gitlab-api-readonly
+              description: "GitLab API token (read_api, read_repository): membership sync and inventory"
+              secret: ${readFile:/run/git-policy-secrets/gitlab-api-token}
+          - usernamePassword:
+              scope: GLOBAL
+              id: git-policy-config-read
+              description: "Read access to the policy repository"
+              username: git-policy
+              password: ${readFile:/run/git-policy-secrets/gitlab-api-token}
+unclassified:
+  location:
+    url: ${JENKINS_URL}
+jobs:
+  # Job DSL only creates the jobs and loads the pipeline files (mounted read-only).
+  - script: |
+      def jobs = [
+        'git-policy'                : '/opt/git-policy-jenkins/Jenkinsfile',
+        'git-policy-gitops'         : '/opt/git-policy-jenkins/Jenkinsfile.gitops',
+        'git-policy-sync-membership': '/opt/git-policy-jenkins/Jenkinsfile.sync-membership',
+      ]
+      jobs.each { name, file ->
+        pipelineJob(name) {
+          definition {
+            cps {
+              script(new File(file).text)
+              sandbox(true)
+            }
+          }
+        }
+      }

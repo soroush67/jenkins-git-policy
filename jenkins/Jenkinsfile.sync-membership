@@ -1,0 +1,62 @@
+// git-policy scheduled group-membership sync (every 15 minutes).
+//
+// For each environment (TEST, then PRODUCTION): read the groups the ACTIVE
+// policy depends on (ctl groups), fetch their members from the GitLab API
+// with the read-only token, and hand the file to the server, which applies
+// it only if its safety guard agrees (>30% drop, missing group, stale data).
+// Overriding the guard (FORCE) is deliberately NOT possible here: use the
+// git-policy job, ACTION=SYNC_GROUP_MEMBERSHIP, FORCE=true (approval in PRODUCTION).
+//
+// Uses the same global variables as jenkins/Jenkinsfile.
+
+def syncOne(String name, String ctl, String sshCred, String url, String tokenCred) {
+    if (!ctl || !sshCred || !url || !tokenCred) {
+        error("Jenkins global variables for ${name} are incomplete; see the jenkins/Jenkinsfile header")
+    }
+    withEnv(["GP_CTL=${ctl}", "GP_GITLAB_URL=${url}", "GP_ENV=${name}"]) {
+        sshagent(credentials: [sshCred]) {
+            withCredentials([string(credentialsId: tokenCred, variable: 'GITLAB_TOKEN')]) {
+                sh '''
+                    set -eu
+                    if [ -n "${GP_SSH_KNOWN_HOSTS:-}" ]; then
+                        GP_SSH_OPTS="-o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$GP_SSH_KNOWN_HOSTS"
+                    else
+                        GP_SSH_OPTS="-o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR"
+                    fi
+                    ctl() { ssh $GP_SSH_OPTS "$GP_CTL" "$*"; }
+                    groups=$(ctl groups)
+                    if [ -z "$groups" ]; then echo "$GP_ENV: the active policy uses no groups: nothing to sync"; exit 0; fi
+                    echo "$GP_ENV: groups used by the active policy: $(echo $groups)"
+                    "$GP_BIN" sync-membership --gitlab-url "$GP_GITLAB_URL" --groups "$groups" -o membership.json
+                    actor=$(printf '%s' "jenkins:${JOB_NAME}#${BUILD_NUMBER} scheduled" | base64 -w0)
+                    ctl "apply-membership --actor-b64=$actor" < membership.json
+                    rm -f membership.json
+                '''
+            }
+        }
+    }
+}
+
+pipeline {
+    agent any
+    triggers { cron('H/15 * * * *') }
+    options {
+        timestamps()
+        disableConcurrentBuilds()
+        timeout(time: 20, unit: 'MINUTES')
+        buildDiscarder(logRotator(numToKeepStr: '100'))
+    }
+    stages {
+        stage('TEST') {
+            steps {
+                script { syncOne('TEST', env.GP_CTL_TEST, env.GP_SSH_CRED_TEST, env.GP_GITLAB_URL_TEST, env.GP_GITLAB_TOKEN_TEST) }
+            }
+        }
+        stage('PRODUCTION') {
+            steps {
+                script { syncOne('PRODUCTION', env.GP_CTL_PRODUCTION, env.GP_SSH_CRED_PRODUCTION, env.GP_GITLAB_URL_PRODUCTION, env.GP_GITLAB_TOKEN_PRODUCTION) }
+            }
+        }
+    }
+    post { cleanup { cleanWs() } }
+}
