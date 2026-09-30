@@ -28,10 +28,12 @@ internal/gitscan/      anti-bypass traversal: every new commit, policy classes, 
 internal/{hook,store,state,audit,message,fsutil}/  push runtime, policy versions, engine switch, audit log, output, atomic fs
 tests/integration/     real `git push` tests; tests/examples/verify.sh checks every scenario row (66 pushes)
 install.sh, uninstall.sh  run on the Docker host against the gitlab container
-docs/fa/               Persian docs: POLICY-FA (writing policies, step by step), GUIDE-FA (guide),
+docs/fa/               Persian docs: DEPLOY-FA (install on a real server), POLICY-FA (writing policies), GUIDE-FA (guide),
                        CLI-FA (every command/option), EXAMPLES-FA (10 scenarios)
 deploy/git-policy-ctl  the only command Jenkins may run on the Docker host (SSH forced command)
 deploy/install-ctl.sh  installs that channel on the real Docker host (user, sudoers, forced-command key)
+deploy/jenkins/        real single-host control plane: setup.sh (channel, token, GitOps repo, Jenkins)
+tests/deploy/          acceptance.sh: non-destructive end-to-end test of a real deployment
 jenkins/Jenkinsfile    control-plane pipeline (13 actions, TEST/PRODUCTION, four-eyes approval)
 jenkins/Jenkinsfile.gitops  GitOps loop: policy repo -> TEST automatically, PRODUCTION drift report
 lab/                   docker-compose lab: GitLab CE 17.10.5 + Jenkins + gp-ctl (lab/up.sh, lab/down.sh)

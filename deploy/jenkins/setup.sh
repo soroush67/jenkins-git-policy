@@ -180,11 +180,12 @@ ck=$(mktemp); trap 'rm -f "$ck"' EXIT
 jc() { curl -s -u "admin:$JPW" -b "$ck" -c "$ck" "$@"; }
 crumb=$(jc "$J/crumbIssuer/api/json" | jq -r '.crumbRequestField+":"+.crumb')
 for job in git-policy git-policy-gitops git-policy-sync-membership; do
+    # (the build does not exist until it starts: 404 -> jq fails -> keep polling)
     before=$(jc "$J/job/$job/api/json" | jq -r '.nextBuildNumber')
     # a job with parameters (after its first run) only accepts buildWithParameters
     code=$(jc -H "$crumb" -X POST -o /dev/null -w '%{http_code}' "$J/job/$job/build")
     [ "$code" = 201 ] || jc -H "$crumb" -X POST -o /dev/null "$J/job/$job/buildWithParameters"
-    r=""; for i in $(seq 1 150); do r=$(jc "$J/job/$job/$before/api/json" | jq -r '.result // empty' 2>/dev/null); [ -n "$r" ] && break; sleep 3; done
+    r=""; for i in $(seq 1 150); do r=$(jc "$J/job/$job/$before/api/json" | jq -r '.result // empty' 2>/dev/null || true); [ -n "$r" ] && break; sleep 3; done
     info "$job #$before: ${r:-still running}"
 done
 

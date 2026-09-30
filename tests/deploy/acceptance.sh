@@ -34,7 +34,7 @@ J=http://127.0.0.1:$PORT
 S=$(date +%m%d%H%M%S)
 GROUP=gp-acceptance-$S USERNAME=gpacc-$S
 WORK=$(mktemp -d)
-PASS=0 FAIL=0 BUILDS=()
+PASS=0 FAIL=0
 ok() { PASS=$((PASS + 1)); printf '  \e[32mPASS\e[0m %s\n' "$1"; }
 ko() { FAIL=$((FAIL + 1)); printf '  \e[31mFAIL\e[0m %s\n' "$1"; [ -n "${2:-}" ] && printf '%s\n' "$2" | tail -20 | sed 's/^/       /'; return 0; }
 
@@ -68,7 +68,7 @@ start() { # start <user> <job> [k=v ...] -> build number
     loc=$(jcurl "$u" -H "$(crumb "$u")" -X POST -D - -o /dev/null "$J/job/$job/buildWithParameters" "${data[@]}" | tr -d '\r' | awk 'tolower($1)=="location:"{print $2}')
     [ -n "$loc" ] || loc=$(jcurl "$u" -H "$(crumb "$u")" -X POST -D - -o /dev/null "$J/job/$job/build" | tr -d '\r' | awk 'tolower($1)=="location:"{print $2}')
     for i in $(seq 1 90); do n=$(jcurl "$u" "${loc}api/json" | jq -r '.executable.number // empty'); [ -n "$n" ] && break; sleep 2; done
-    BUILDS+=("$job/$n"); echo "$n"
+    echo "$job/$n" >> "$WORK/builds"; echo "$n"   # start runs in $(...): record in a file
 }
 wait_build() {
     local r i; for i in $(seq 1 300); do r=$(jcurl admin "$J/job/$1/$2/api/json" | jq -r '.result // empty'); [ -n "$r" ] && break; sleep 2; done
@@ -106,7 +106,11 @@ expect 'SUCCESS' "ENABLE" "$(run git-policy ACTION=ENABLE ENVIRONMENT=TEST "REAS
     echo "  NOTE 01-block-dll is still installed: it may reject .dll pushes before git-policy does"
 
 echo "== fixtures: user $USERNAME, group $GROUP, project $GROUP/app"
-UID_=$(api POST /users -d "$(jq -nc --arg u "$USERNAME" '{username:$u, name:$u, email:($u+"@acceptance.invalid"), password:("Acc-"+($u|ascii_upcase)+"-9x!"), skip_confirmation:true}')" | jq -r .id)
+# random password (GitLab refuses passwords containing the username or common words); never used
+UPW="$(head -c 48 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 24)-Qz7!"
+resp=$(api POST /users -d "$(jq -nc --arg u "$USERNAME" --arg p "$UPW" '{username:$u, name:$u, email:($u+"@acceptance.invalid"), password:$p, skip_confirmation:true}')")
+UID_=$(jq -r '.id // empty' <<<"$resp")
+[ -n "$UID_" ] || { ko "create user $USERNAME" "$resp"; exit 1; }
 UTOK=$(api POST "/users/$UID_/personal_access_tokens" -d "$(jq -nc --arg e "$(date -u -d '+1 day' +%F)" '{name:"acceptance", scopes:["api","write_repository"], expires_at:$e}')" | jq -r .token)
 GID=$(api POST /groups -d "$(jq -nc --arg p "$GROUP" '{name:$p, path:$p, visibility:"private"}')" | jq -r .id)
 api POST "/groups/$GID/members" -d "{\"user_id\":$UID_,\"access_level\":40}" >/dev/null
@@ -170,6 +174,7 @@ expect 'SUCCESS' "ENABLE again" "$(run git-policy ACTION=ENABLE ENVIRONMENT=TEST
 
 echo "== secrets"
 leak=0
+mapfile -t BUILDS < "$WORK/builds"
 for b in "${BUILDS[@]}"; do
     c=$(jcurl admin "$J/job/${b%/*}/${b##*/}/consoleText")
     for f in gitlab-api-token jenkins-admin-password jenkins-approver-password; do grep -qF "$(cat "$SEC/$f")" <<<"$c" && leak=1; done
