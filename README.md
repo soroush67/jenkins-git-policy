@@ -28,7 +28,8 @@ internal/gitscan/      anti-bypass traversal: every new commit, policy classes, 
 internal/{hook,store,state,audit,message,fsutil}/  push runtime, policy versions, engine switch, audit log, output, atomic fs
 tests/integration/     real `git push` tests; tests/examples/verify.sh checks every scenario row (66 pushes)
 install.sh, uninstall.sh  run on the Docker host against the gitlab container
-docs/fa/               Persian docs: GUIDE-FA (guide), CLI-FA (every command/option), EXAMPLES-FA (10 scenarios)
+docs/fa/               Persian docs: POLICY-FA (writing policies, step by step), GUIDE-FA (guide),
+                       CLI-FA (every command/option), EXAMPLES-FA (10 scenarios)
 deploy/git-policy-ctl  the only command Jenkins may run on the Docker host (SSH forced command)
 deploy/install-ctl.sh  installs that channel on the real Docker host (user, sudoers, forced-command key)
 jenkins/Jenkinsfile    control-plane pipeline (13 actions, TEST/PRODUCTION, four-eyes approval)
@@ -36,7 +37,8 @@ jenkins/Jenkinsfile.gitops  GitOps loop: policy repo -> TEST automatically, PROD
 lab/                   docker-compose lab: GitLab CE 17.10.5 + Jenkins + gp-ctl (lab/up.sh, lab/down.sh)
 tests/gitlab/          end-to-end verification of all phases on the real lab GitLab
 schema/                JSON Schema for editors/CI (Go validator is authoritative)
-examples/              reference policies; examples/scenarios/ = 10 graded scenarios (docs/fa/EXAMPLES-FA.md)
+examples/              reference policies; scenarios/ = 10 graded scenarios (docs/fa/EXAMPLES-FA.md),
+                       tutorial/ = the step files of docs/fa/POLICY-FA.md
 testdata/policies/     invalid-policy fixtures with expected codes
 tools/build.sh         docker-based vendor/test/build (no Go needed on the host)
 ```

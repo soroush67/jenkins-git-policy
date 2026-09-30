@@ -75,14 +75,22 @@ cexec id git >/dev/null 2>&1 || die "no 'git' account in $CONTAINER"
 info "git account: $(cexec id git)"
 
 step "3/7 Gitaly custom hooks"
-cexec test -d "$HOOK_DIR" || die "$HOOK_DIR does not exist in $CONTAINER"
 if cexec grep -q "custom_hooks_dir *= *\"/var/opt/gitlab/gitaly/custom_hooks\"" "$GITALY_CONFIG" 2>/dev/null; then
     info "gitaly custom_hooks_dir = /var/opt/gitlab/gitaly/custom_hooks"
 else
     die "gitaly config does not set custom_hooks_dir to /var/opt/gitlab/gitaly/custom_hooks ($GITALY_CONFIG)"
 fi
-info "existing global pre-receive hooks (left untouched):"
-cexec ls -l "$HOOK_DIR" | sed 's/^/      /'
+# A fresh GitLab has no pre-receive.d yet: create it (root:root 0755, like
+# the directory Gitaly reads) instead of making the operator do it by hand.
+if cexec test -d "$HOOK_DIR"; then
+    info "existing global pre-receive hooks (left untouched):"
+    cexec ls -l "$HOOK_DIR" | sed 's/^/      /'
+elif [ "$DRY_RUN" = 1 ]; then
+    info "$HOOK_DIR does not exist yet: it will be created (root:root 0755)"
+else
+    cexec install -d -o root -g root -m 0755 "$HOOK_DIR"
+    info "created $HOOK_DIR (root:root 0755)"
+fi
 
 step "4/7 existing installation"
 if cexec test -x "$ROOT/bin/git-policy"; then

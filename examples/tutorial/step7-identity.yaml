@@ -1,0 +1,50 @@
+# yaml-language-server: $schema=../../schema/policy.v1.schema.json
+# Step 7: who may push where (users and GitLab groups).
+apiVersion: git-policy/v1
+kind: GitPolicy
+metadata:
+  name: acme-git-policy
+  revision: 7
+mandatory:
+  blocked_extensions: [dll, exe]
+  blocked_signatures: [pe]
+  max_file_size: 50MiB
+  deny_users: [terminated.user]
+  deny_groups: [blocked-accounts]
+defaults:
+  blocked_extensions: [pdb, nupkg, zip, 7z, msi]
+  blocked_paths: ["**/bin/Debug/**", "**/bin/Release/**", "**/obj/**", "**/packages/**"]
+  max_file_size: 20MiB
+  refs:
+    "refs/tags/**": {max_file_size: 5MiB}
+namespaces:
+  finance:
+    blocked_extensions: [pfx, p12]
+    max_file_size: 10MiB
+    refs:
+      "refs/heads/release/**": {blocked_extensions: [pdf]}
+  legacy:
+    mode: audit
+projects:
+  finance/reporting:
+    unblock_extensions: [zip]
+  data/models:
+    max_file_size: 45MiB
+  sandbox/playground:
+    enabled: false
+users:
+  alex:
+    projects:
+      finance/payment-api: {push: deny}     # alex may not push to this project
+  intern.sara:
+    push: deny                              # nowhere ...
+    namespaces:
+      training: {push: allow}               # ... except under training/
+groups:
+  contractors:
+    push: deny                              # contractors: nowhere ...
+    namespaces:
+      outsourcing: {push: allow}            # ... except outsourcing/
+  qa-team:
+    refs:
+      "refs/tags/**": deny                  # QA may not create or move tags

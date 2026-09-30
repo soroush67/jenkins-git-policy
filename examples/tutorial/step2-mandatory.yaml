@@ -1,0 +1,12 @@
+# yaml-language-server: $schema=../../schema/policy.v1.schema.json
+# Step 2: the security floor (mandatory). Nothing below can weaken it.
+apiVersion: git-policy/v1
+kind: GitPolicy
+metadata:
+  name: acme-git-policy
+  revision: 2
+mandatory:
+  blocked_extensions: [dll, exe]      # by name, at any depth, any case
+  blocked_signatures: [pe]            # Windows executables even if renamed (e.g. lib.txt)
+  max_file_size: 50MiB                # absolute cap for every file
+  deny_users: [terminated.user]       # these accounts cannot push anywhere

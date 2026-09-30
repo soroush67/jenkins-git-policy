@@ -40,6 +40,9 @@ func expectedCode(t *testing.T, file string) string {
 
 func TestExamplesAreValid(t *testing.T) {
 	files, _ := filepath.Glob(repoPath("examples/*.yaml"))
+	// The step-by-step files of docs/fa/POLICY-FA.md.
+	tutorial, _ := filepath.Glob(repoPath("examples/tutorial/*.yaml"))
+	files = append(files, tutorial...)
 	if len(files) == 0 {
 		t.Fatal("no examples found")
 	}

@@ -1,0 +1,8 @@
+# yaml-language-server: $schema=../../schema/policy.v1.schema.json
+# Step 1: the smallest valid policy. It enforces nothing yet.
+apiVersion: git-policy/v1
+kind: GitPolicy
+metadata:
+  name: acme-git-policy
+  revision: 1
+  description: Git content and identity policy of ACME.

@@ -1,0 +1,82 @@
+# yaml-language-server: $schema=../../schema/policy.v1.schema.json
+# Step 8: time-limited, narrow exceptions (with ticket, reason and expiry).
+apiVersion: git-policy/v1
+kind: GitPolicy
+metadata:
+  name: acme-git-policy
+  revision: 8
+mandatory:
+  blocked_extensions: [dll, exe]
+  blocked_signatures: [pe]
+  max_file_size: 50MiB
+  deny_users: [terminated.user]
+  deny_groups: [blocked-accounts]
+defaults:
+  blocked_extensions: [pdb, nupkg, zip, 7z, msi]
+  blocked_paths: ["**/bin/Debug/**", "**/bin/Release/**", "**/obj/**", "**/packages/**"]
+  max_file_size: 20MiB
+  refs:
+    "refs/tags/**": {max_file_size: 5MiB}
+namespaces:
+  finance:
+    blocked_extensions: [pfx, p12]
+    max_file_size: 10MiB
+    refs:
+      "refs/heads/release/**": {blocked_extensions: [pdf]}
+  legacy:
+    mode: audit
+projects:
+  finance/reporting:
+    unblock_extensions: [zip]
+  data/models:
+    max_file_size: 45MiB
+  sandbox/playground:
+    enabled: false
+users:
+  alex:
+    projects:
+      finance/payment-api: {push: deny}     # alex may not push to this project
+  intern.sara:
+    push: deny                              # nowhere ...
+    namespaces:
+      training: {push: allow}               # ... except under training/
+groups:
+  contractors:
+    push: deny                              # contractors: nowhere ...
+    namespaces:
+      outsourcing: {push: allow}            # ... except outsourcing/
+  qa-team:
+    refs:
+      "refs/tags/**": deny                  # QA may not create or move tags
+exceptions:
+  - id: EXC-2026-001                        # unique, UPPERCASE
+    rules: [BLOCKED_EXTENSION]
+    mandatory: true                         # needed because dll is a mandatory rule
+    scope:
+      projects: [finance/legacy-erp]
+      refs: ["refs/heads/main"]
+      paths: ["vendor/VendorSdk/*.dll"]     # only these files
+    reason: Vendor SDK has no NuGet package yet; migration tracked in INFRA-2231.
+    ticket: INFRA-2231
+    approved_by: security-team
+    expires: 2026-12-31
+  - id: EXC-2026-002
+    rules: [LIMIT_COMMITS, LIMIT_OBJECTS]
+    subjects:
+      users: [svc-migration]                # only this account
+    scope:
+      namespaces: [legacy]
+    reason: One-time import of the old SVN history into GitLab.
+    ticket: INFRA-2240
+    expires: 2026-11-30
+  - id: EXC-2026-003
+    rules: [FILE_TOO_LARGE]
+    mandatory: true                         # above the 50MiB mandatory cap
+    subjects:
+      groups: [data-science]
+    scope:
+      projects: [data/models]
+    max_file_size: 200MiB
+    reason: Model snapshots until the MLflow artifact store is ready.
+    ticket: DS-118
+    expires: 2027-01-31

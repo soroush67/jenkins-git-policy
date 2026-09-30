@@ -1,0 +1,116 @@
+# yaml-language-server: $schema=../../schema/policy.v1.schema.json
+# Step 9: the complete policy with every settings block (all values shown
+# are the defaults unless commented otherwise).
+apiVersion: git-policy/v1
+kind: GitPolicy
+metadata:
+  name: acme-git-policy
+  revision: 9
+  description: Git content and identity policy of ACME.
+settings:
+  mode: enforce                   # enforce | audit (for all non-mandatory rules)
+  repository_types:               # all | mandatory_only | none
+    project: all
+    wiki: mandatory_only
+    snippet: mandatory_only
+    design: none
+  limits:
+    max_ref_updates: 1000         # refs per push
+    max_new_commits: 50000        # new commits per push
+    max_new_blobs: 500000         # new files (blobs) per push
+    evaluation_timeout: 45s
+  membership:
+    soft_max_age: 2h              # older: warning in status
+    hard_max_age: 24h             # older: group allows ignored, denies kept
+    on_unavailable: deny_if_group_rules   # or ignore_groups
+  audit:
+    required: false               # true: reject pushes if the audit log cannot be written
+    retention_days: 180
+    log_accepted: true            # default false; true logs every accepted push too
+  exceptions:
+    max_lifetime_days: 180
+  messages:
+    header: "Push rejected by ACME Git policy."
+    support: "Help: #devops-help or devops@acme.example"
+    remediation:
+      BLOCKED_EXTENSION: >-
+        Binary dependencies do not belong in Git. Publish them as NuGet
+        packages to Nexus (https://nexus.acme.example) and use PackageReference.
+      BLOCKED_SIGNATURE: "This file is a Windows executable, whatever its name. Publish it to Nexus."
+      FILE_TOO_LARGE: "Store large files in Nexus or Git LFS, not in Git."
+      BLOCKED_PATH: "Build output (bin/, obj/, packages/) must not be committed. Check your .gitignore."
+mandatory:
+  blocked_extensions: [dll, exe]
+  blocked_signatures: [pe]
+  max_file_size: 50MiB
+  deny_users: [terminated.user]
+  deny_groups: [blocked-accounts]
+defaults:
+  blocked_extensions: [pdb, nupkg, zip, 7z, msi]
+  blocked_paths: ["**/bin/Debug/**", "**/bin/Release/**", "**/obj/**", "**/packages/**"]
+  max_file_size: 20MiB
+  refs:
+    "refs/tags/**": {max_file_size: 5MiB}
+namespaces:
+  finance:
+    blocked_extensions: [pfx, p12]
+    max_file_size: 10MiB
+    refs:
+      "refs/heads/release/**": {blocked_extensions: [pdf]}
+  legacy:
+    mode: audit
+projects:
+  finance/reporting:
+    unblock_extensions: [zip]
+  data/models:
+    max_file_size: 45MiB
+  sandbox/playground:
+    enabled: false
+users:
+  alex:
+    projects:
+      finance/payment-api: {push: deny}     # alex may not push to this project
+  intern.sara:
+    push: deny                              # nowhere ...
+    namespaces:
+      training: {push: allow}               # ... except under training/
+groups:
+  contractors:
+    push: deny                              # contractors: nowhere ...
+    namespaces:
+      outsourcing: {push: allow}            # ... except outsourcing/
+  qa-team:
+    refs:
+      "refs/tags/**": deny                  # QA may not create or move tags
+exceptions:
+  - id: EXC-2026-001                        # unique, UPPERCASE
+    rules: [BLOCKED_EXTENSION]
+    mandatory: true                         # needed because dll is a mandatory rule
+    scope:
+      projects: [finance/legacy-erp]
+      refs: ["refs/heads/main"]
+      paths: ["vendor/VendorSdk/*.dll"]     # only these files
+    reason: Vendor SDK has no NuGet package yet; migration tracked in INFRA-2231.
+    ticket: INFRA-2231
+    approved_by: security-team
+    expires: 2026-12-31
+  - id: EXC-2026-002
+    rules: [LIMIT_COMMITS, LIMIT_OBJECTS]
+    subjects:
+      users: [svc-migration]                # only this account
+    scope:
+      namespaces: [legacy]
+    reason: One-time import of the old SVN history into GitLab.
+    ticket: INFRA-2240
+    expires: 2026-11-30
+  - id: EXC-2026-003
+    rules: [FILE_TOO_LARGE]
+    mandatory: true                         # above the 50MiB mandatory cap
+    subjects:
+      groups: [data-science]
+    scope:
+      projects: [data/models]
+    max_file_size: 200MiB
+    reason: Model snapshots until the MLflow artifact store is ready.
+    ticket: DS-118
+    expires: 2027-01-31

@@ -10,6 +10,8 @@
 - lab محلی
 - اسکریپت‌های build و تست
 
+برای **نوشتن policy** (کلیدهای فایل YAML) به [POLICY-FA.md](POLICY-FA.md) مراجعه کنید.
+
 همه‌ی گزینه‌ها از خروجی خود برنامه (`git-policy help` و `-h` هر دستور) استخراج شده‌اند.
 
 > نسخه: **v0.1.0** — schema سیاست: **`git-policy/v1`**
@@ -516,7 +518,7 @@ $SSH "logs --date=2026-09-29" > audit.jsonl
 3. mount بودن `/var/opt/gitlab`
 4. وجود کاربر `git`
 5. تنظیم `custom_hooks_dir` در Gitaly
-6. hookهای موجود
+6. hookهای موجود؛ اگر پوشه‌ی `pre-receive.d` هنوز وجود نداشته باشد (GitLab تازه)، ساخته می‌شود (`root:root 0755`)
 
 بعد از نصب، `status` نمایش داده می‌شود.
 
@@ -630,6 +632,8 @@ $SSH "logs --date=2026-09-29" > audit.jsonl
 | `tests/gitlab/verify-gitlab.sh` | **همه‌ی فازها روی GitLab واقعی lab** (۸۵ بررسی): HTTP، SSH، Web، fork+MR، wiki، deploy key، کانال و jobهای Jenkins، sync گروه‌ها، TEST 17/18 |
 | `tools/dev/check_schema.py` | بررسی JSON Schema با فایل‌های نمونه |
 | `tools/dev/rtl.py FILE…` | راست‌چین کردن اسناد فارسی (کد بلاک‌ها چپ‌چین) |
+
+`tools/build.sh` **فقط** همین چهار آرگومان را می‌پذیرد (`vendor`، `test`، `build`، `all`)؛ بدون آرگومان یعنی `all`. گزینه‌ای مثل `--binary` مال `install.sh` است، نه build. اجرای آن با root هم مشکلی ندارد.
 
 متغیر محیطی `GO_IMAGE` در `tools/build.sh` image مورد استفاده را عوض می‌کند (پیش‌فرض `git-policy-build:go1.24`).
 
